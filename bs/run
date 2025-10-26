@@ -1,0 +1,47 @@
+set -euo pipefail
+
+
+cmd=${1:-}
+if [[ -z "$cmd" ]]; then
+echo "Usage: ./run {install|test|/absolute/path/to/URL_FILE}" >&2
+exit 1
+fi
+
+
+if [[ "$cmd" == "install" ]]; then
+python3 -m pip install --user -U pip
+python3 -m pip install --user -e .[dev]
+echo "OK" >&2
+exit 0
+elif [[ "$cmd" == "test" ]]; then
+# Run pytest with coverage and print required summary line
+python3 - <<'PY'
+import subprocess, sys, re
+
+
+# run tests with coverage
+proc = subprocess.run([sys.executable, '-m', 'pytest', '--cov=acemcli', '--cov-report=term-missing', '-q'], capture_output=True, text=True)
+print(proc.stdout)
+# naive parse of summary line from pytest output
+out = proc.stdout + proc.stderr
+m_total = re.search(r"collected (\d+) items", out)
+passed = len(re.findall(r"\bPASSED\b", out))
+
+
+total = int(m_total.group(1)) if m_total else passed
+# try to get coverage percentage
+m_cov = re.search(r"TOTAL\s+\d+\s+\d+\s+\d+%|\b(\d+)%\b", out)
+perc = m_cov.group(1) if m_cov else '0'
+print(f"{passed}/{total} test cases passed. {perc}% line coverage achieved.")
+
+
+sys.exit(proc.returncode)
+PY
+exit $?
+elif [[ -f "$cmd" ]]; then
+shift || true
+python3 -m acmecli.cli "$cmd" "$@"
+else
+echo "Unknown command: $cmd" >&2
+exit 1
+fi

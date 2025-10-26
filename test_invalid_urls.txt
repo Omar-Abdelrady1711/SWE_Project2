@@ -1,0 +1,4 @@
+https://huggingface.co/bert-base-uncased
+not-a-valid-url
+https://huggingface.co/gpt2
+ftp://invalid-protocol.com

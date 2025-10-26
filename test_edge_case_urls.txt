@@ -1,0 +1,9 @@
+  https://huggingface.co/user/model  
+	https://huggingface.co/user/model	
+https://huggingface.co/üser/mödel
+https://huggingface.co/用户/模型
+HTTPS://HUGGINGFACE.CO/USER/MODEL
+https://HUGGINGFACE.co/user/MODEL
+https://huggingface.co/user/model?param=value
+https://huggingface.co/user/model#fragment
+https://huggingface.co/user/model?param=value&other=test

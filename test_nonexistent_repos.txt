@@ -1,0 +1,6 @@
+https://huggingface.co/definitely-does-not-exist/invalid-repo-12345
+https://huggingface.co/user/nonexistent-model-xyz  
+https://huggingface.co/fake-user/fake-model-that-does-not-exist
+https://huggingface.co/test-user-does-not-exist/test-model-12345
+https://huggingface.co/invalid123/repo456
+https://huggingface.co/missing-user/missing-repo-999

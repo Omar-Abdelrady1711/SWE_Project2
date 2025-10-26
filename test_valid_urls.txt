@@ -1,0 +1,8 @@
+# Valid MODEL URLs for testing
+https://huggingface.co/bert-base-uncased
+https://huggingface.co/gpt2
+https://huggingface.co/microsoft/DialoGPT-medium
+
+# These will be skipped (not MODEL category)
+https://huggingface.co/datasets/squad
+https://github.com/huggingface/transformers

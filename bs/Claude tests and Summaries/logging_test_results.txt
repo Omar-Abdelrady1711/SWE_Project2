@@ -1,0 +1,37 @@
+
+==================================================
+Testing LOG_LEVEL=0 (CRITICAL)
+==================================================
+Root logger level: 50
+Number of log messages captured: 1
+Captured messages:
+  CRITICAL: This is a critical message
+
+==================================================
+Testing LOG_LEVEL=1 (INFO)
+==================================================
+Root logger level: 20
+Number of log messages captured: 4
+Captured messages:
+  CRITICAL: This is a critical message
+  ERROR: This is an error message
+  WARNING: This is a warning message
+  INFO: This is an info message
+
+==================================================
+Testing LOG_LEVEL=2 (DEBUG)
+==================================================
+Root logger level: 10
+Number of log messages captured: 5
+Captured messages:
+  CRITICAL: This is a critical message
+  ERROR: This is an error message
+  WARNING: This is a warning message
+  INFO: This is an info message
+  DEBUG: This is a debug message
+
+==================================================
+Testing default behavior (no LOG_LEVEL)
+==================================================
+Default root logger level: 50
+Expected level for default (0): 50

@@ -1,0 +1,10 @@
+LOGGING VERIFICATION RESULTS
+========================================
+LOG_LEVEL=0: Root level = 50 (Expected: 50)
+LOG_LEVEL=1: Root level = 20 (Expected: 20)
+LOG_LEVEL=2: Root level = 10 (Expected: 10)
+Default (no LOG_LEVEL): Root level = 50 (Expected: 50)
+
+SUMMARY:
+Overall: PASS
+✅ All logging levels are configured correctly!

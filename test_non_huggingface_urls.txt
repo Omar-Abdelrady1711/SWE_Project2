@@ -1,0 +1,8 @@
+https://github.com/user/repo
+https://gitlab.com/user/project  
+https://google.com
+https://pypi.org/project/requests
+https://stackoverflow.com/questions
+https://docs.python.org
+https://arxiv.org/abs/1234.5678
+https://www.tensorflow.org/models

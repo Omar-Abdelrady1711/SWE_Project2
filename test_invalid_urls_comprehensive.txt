@@ -1,0 +1,36 @@
+# Task 5.5 Test Files: Invalid URL Scenarios
+
+# File 1: Malformed URLs
+not-a-url-at-all
+htp://broken-protocol
+https://
+://missing-protocol
+ftp://huggingface.co/model
+file:///local/path
+mailto:test@example.com
+
+# File 2: Empty and whitespace URLs
+
+
+   
+	
+
+# File 3: Invalid HuggingFace URLs
+https://huggingface.co/
+https://huggingface.co/incomplete
+https://huggingface.co//double-slash
+https://huggingface.co/user//empty-repo
+https://huggingface.co/user name/repo
+https://huggingface.co/user/repo|pipe
+
+# File 4: Non-HuggingFace URLs
+https://github.com/user/repo
+https://google.com
+https://pypi.org/project/requests
+https://stackoverflow.com/questions
+https://docs.python.org
+
+# File 5: Non-existent repositories
+https://huggingface.co/definitely-does-not-exist/invalid-repo-12345
+https://huggingface.co/user/nonexistent-model-xyz
+https://huggingface.co/fake-user/fake-model-that-does-not-exist

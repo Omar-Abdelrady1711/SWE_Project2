@@ -1,0 +1,7 @@
+not-a-url-at-all
+htp://broken-protocol  
+https://
+://missing-protocol
+just-plain-text
+123456
+special-chars!@#$%^&*()

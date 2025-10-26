@@ -1,0 +1,43 @@
+🚀 ACME CLI Test Diagnostic Report
+==================================================
+
+1. Current directory: /Users/blas/Documents/Obsidian Vault/School/F25/ECE 461/Project Repo/ECE30861_HW1
+2. Run file exists: True
+   Run file executable: False
+
+3. Testing basic pytest...
+   Pytest available: False
+   Pytest version: 
+
+4. Testing imports...
+   ❌ acemcli.logging_setup import failed: No module named 'acemcli'
+   ❌ performance_claims metric import failed: No module named 'acemcli'
+   Traceback: Traceback (most recent call last):
+  File "/Users/blas/Documents/Obsidian Vault/School/F25/ECE 461/Project Repo/ECE30861_HW1/diagnostic.py", line 48, in main
+    from acemcli.metrics.performance_claims import PerformanceClaimsMetric
+ModuleNotFoundError: No module named 'acemcli'
+
+   ❌ acemcli.cli import failed: No module named 'acemcli'
+
+5. Testing pytest collection...
+   Collection return code: 1
+   STDOUT:
+
+   STDERR:
+/opt/homebrew/opt/python@3.13/bin/python3.13: No module named pytest
+
+   Tests found: 0
+
+6. Testing actual test run...
+   Test run return code: 1
+   STDOUT:
+
+   STDERR:
+/opt/homebrew/opt/python@3.13/bin/python3.13: No module named pytest
+
+
+7. Testing ./run test command...
+   ./run test error: [Errno 13] Permission denied: './run'
+
+==================================================
+Diagnostic complete! Check this file for results.
