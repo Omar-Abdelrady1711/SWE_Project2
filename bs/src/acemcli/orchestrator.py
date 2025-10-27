@@ -1,14 +1,18 @@
 from __future__ import annotations
+
 import concurrent.futures as cf
 import logging
 from typing import Iterable, List, Tuple
+
 import orjson
-from acmecli.metrics.base import all_metrics
-from acmecli.models import MetricResult, Category
-from acmecli.config import load_config
+
+from acemcli.metrics.base import all_metrics
+from acemcli.models import MetricResult, Category
+from acemcli.config import load_config
 
 log = logging.getLogger(__name__)
 
+# Weight keys must match MetricResult field names (dot-path for dict entries)
 WEIGHTS = {
     "ramp_up_time": 0.15,
     "bus_factor": 0.15,
@@ -20,10 +24,14 @@ WEIGHTS = {
     "code_quality": 0.15,
 }
 
+
 def _merge(base: MetricResult, add: MetricResult) -> MetricResult:
+    """Merge a partial MetricResult 'add' into 'base' (preferring non-zero values)."""
+
     def pick(a: float, b: float) -> float:
         return b if isinstance(b, (int, float)) and b not in (0, 0.0) else a
 
+    # scalar metrics + their latencies
     base.ramp_up_time = pick(base.ramp_up_time, add.ramp_up_time)
     base.ramp_up_time_latency = max(base.ramp_up_time_latency, add.ramp_up_time_latency)
 
@@ -36,19 +44,24 @@ def _merge(base: MetricResult, add: MetricResult) -> MetricResult:
     base.license = pick(base.license, add.license)
     base.license_latency = max(base.license_latency, add.license_latency)
 
+    # dict metric: size_score (merge per device/bucket)
     for k in base.size_score:
         base.size_score[k] = pick(base.size_score[k], add.size_score.get(k, 0.0))
     base.size_score_latency = max(base.size_score_latency, add.size_score_latency)
 
     base.dataset_and_code_score = pick(base.dataset_and_code_score, add.dataset_and_code_score)
-    base.dataset_and_code_score_latency = max(base.dataset_and_code_score_latency, add.dataset_and_code_score_latency)
+    base.dataset_and_code_score_latency = max(
+        base.dataset_and_code_score_latency, add.dataset_and_code_score_latency
+    )
 
     base.dataset_quality = pick(base.dataset_quality, add.dataset_quality)
     base.dataset_quality_latency = max(base.dataset_quality_latency, add.dataset_quality_latency)
 
     base.code_quality = pick(base.code_quality, add.code_quality)
     base.code_quality_latency = max(base.code_quality_latency, add.code_quality_latency)
+
     return base
+
 
 def _compute_one(url: str, category: Category) -> MetricResult:
     contributing = [m for m in all_metrics() if m.supports(url, category)]
@@ -60,20 +73,24 @@ def _compute_one(url: str, category: Category) -> MetricResult:
     for r in results[1:]:
         base = _merge(base, r)
 
+    # compute net score with clamp to [0, 1]
     net = 0.0
     net += WEIGHTS["ramp_up_time"] * base.ramp_up_time
     net += WEIGHTS["bus_factor"] * base.bus_factor
     net += WEIGHTS["performance_claims"] * base.performance_claims
     net += WEIGHTS["license"] * base.license
-    net += WEIGHTS["size_score.desktop_pc"] * base.size_score["desktop_pc"]
+    net += WEIGHTS["size_score.desktop_pc"] * base.size_score.get("desktop_pc", 0.0)
     net += WEIGHTS["dataset_and_code_score"] * base.dataset_and_code_score
     net += WEIGHTS["dataset_quality"] * base.dataset_quality
     net += WEIGHTS["code_quality"] * base.code_quality
+
     base.net_score = max(0.0, min(1.0, net))
     base.net_score_latency = 0
     return base
 
+
 def compute_all(pairs: Iterable[tuple[str, Category]]) -> Tuple[List[MetricResult], List[tuple[str, str]]]:
+    """Compute metrics for many (url, category) pairs in parallel."""
     cfg = load_config()
     results: List[MetricResult] = []
     errors: List[tuple[str, str]] = []
@@ -90,7 +107,9 @@ def compute_all(pairs: Iterable[tuple[str, Category]]) -> Tuple[List[MetricResul
                 log.warning("compute failed for %s (%s): %s", url, cat, msg)
     return results, errors
 
-def to_ndjson(res: MetricResult) -> bytes:
+
+def to_ndjson(res: MetricResult) -> str:
+    """Return a single-line JSON string for NDJSON output."""
     payload = {
         "name": res.name,
         "category": res.category,
@@ -113,4 +132,5 @@ def to_ndjson(res: MetricResult) -> bytes:
         "code_quality": res.code_quality,
         "code_quality_latency": res.code_quality_latency,
     }
-    return orjson.dumps(payload) + b"\n"
+    # Return a text line (the CLI will print it).
+    return orjson.dumps(payload).decode("utf-8")

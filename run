@@ -1,0 +1,48 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# choose python
+if command -v python3 >/dev/null 2>&1; then PY=python3; else PY=python; fi
+
+# repo root = this script's dir
+ROOT="$(cd "$(dirname "$0")" && pwd -P)"
+
+cmd="${1:-}"
+if [[ -z "$cmd" ]]; then
+  echo "Usage: ./run {install|test|URL_FILE}" >&2
+  exit 1
+fi
+
+case "$cmd" in
+  install)
+    "$PY" -m pip install -U pip
+    "$PY" -m pip install -e "$ROOT"[dev] || "$PY" -m pip install -e "$ROOT"
+    echo "OK" >&2
+    ;;
+
+  test)
+    set +e
+    OUT=$("$PY" -m pytest --cov=acemcli --cov-report=term-missing -q 2>&1)
+    RC=$?
+    set -e
+    echo "$OUT"
+    PASSED=$(printf "%s" "$OUT" | grep -oE '\bPASSED\b' | wc -l | tr -d ' ')
+    COLLECTED=$(printf "%s" "$OUT" | grep -oE 'collected [0-9]+ items' | awk '{print $2}')
+    [[ -z "$COLLECTED" ]] && COLLECTED=$PASSED
+    COV=$(printf "%s" "$OUT" | grep -E 'TOTAL\s+[0-9]+\s+[0-9]+\s+[0-9]+%' | awk '{print $NF}' | tr -d '%')
+    [[ -z "$COV" ]] && COV=0
+    echo "${PASSED}/${COLLECTED} test cases passed. ${COV}% line coverage achieved."
+    exit $RC
+    ;;
+
+  *)
+    URLFILE="$cmd"; shift || true
+    if [[ ! -f "$URLFILE" ]]; then
+      echo "URL_FILE not found: $URLFILE" >&2
+      exit 1
+    fi
+    mkdir -p "$ROOT/output"
+    ABS="$(cd "$(dirname "$URLFILE")" && pwd -P)/$(basename "$URLFILE")"
+    "$PY" -m acemcli.cli "$ABS" "$@"
+    ;;
+esac
