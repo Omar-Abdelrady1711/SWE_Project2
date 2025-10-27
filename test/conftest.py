@@ -19,7 +19,7 @@ if acemcli is None:
     sys.modules["acemcli"] = acemcli
 
 # Map acemcli.metrics -> local metrics package
-metrics_mod = importlib.import_module("metrics")
+metrics_mod = importlib.import_module("acemcli.metrics")
 sys.modules["acemcli.metrics"] = metrics_mod
 
 # Map acemcli.models -> local models module if it exists; otherwise stub the bits tests need

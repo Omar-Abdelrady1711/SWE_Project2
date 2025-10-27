@@ -2,29 +2,34 @@
 requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
-
 [project]
-name = "acmecli"
+name = "acemcli"                    # ← match the import path used by tests
 version = "0.0.1"
 description = "CLI for trustworthy model reuse"
 requires-python = ">=3.9"
 dependencies = [
-"typing-extensions>=4.8",
-"huggingface-hub>=0.24.0",
-"orjson>=3.9.0",
-"requests>=2.31.0",
+  "typing-extensions>=4.8",
+  "huggingface-hub>=0.24.0",
+  "orjson>=3.9.0",
+  "requests>=2.31.0",
 ]
-
 
 [project.optional-dependencies]
 dev = [
-"pytest>=7.4",
-"pytest-cov>=4.1",
-"mypy>=1.10",
-"flake8>=7.0",
-"isort>=5.12",
+  "pytest>=7.4",
+  "pytest-cov>=4.1",
+  "mypy>=1.10",
+  "flake8>=7.0",
+  "isort>=5.12",
 ]
 
+# >>> tell setuptools where the package actually is (under bs/src)
+[tool.setuptools]
+package-dir = { "" = "bs/src" }
+
+[tool.setuptools.packages.find]
+where = ["bs/src"]
+include = ["acemcli*"]
 
 [tool.mypy]
 python_version = "3.10"
