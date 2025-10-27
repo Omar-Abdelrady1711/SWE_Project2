@@ -1,6 +1,7 @@
 from __future__ import annotations
 import time
 from huggingface_hub import HfApi
+from src.config import load_config
 from src.models import MetricResult, Category
 from src.metrics.base import register
 
