@@ -16,9 +16,12 @@ fi
 case "$cmd" in
   install)
     "$PY" -m pip install -U pip
-    "$PY" -m pip install -e "$ROOT"[dev] || "$PY" -m pip install -e "$ROOT"
+    # install the package
+    "$PY" -m pip install -e "$ROOT"
+    # then try to install dev extras (quote [dev] to avoid bash globbing)
+    "$PY" -m pip install -e "$ROOT"'[dev]' || true
     echo "OK" >&2
-    ;;
+  ;;
 
   test)
     set +e
