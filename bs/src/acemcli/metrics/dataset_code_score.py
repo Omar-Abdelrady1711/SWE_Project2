@@ -9,8 +9,8 @@ import tempfile
 from pathlib import Path
 from typing import List, Dict, Any
 from huggingface_hub import snapshot_download
-from acemcli.models import MetricResult, Category
-from acemcli.metrics.base import register
+from ..models import MetricResult, Category
+from .base import register
 import logging
 
 logger = logging.getLogger(__name__)
