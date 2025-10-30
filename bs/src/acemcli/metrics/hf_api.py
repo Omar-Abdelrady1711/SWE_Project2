@@ -1,9 +1,9 @@
 from __future__ import annotations
 import time
 from huggingface_hub import HfApi
-from acemcli.models import MetricResult, Category
-from acemcli.metrics.base import register
-from acemcli.config import load_config
+from ..models import MetricResult, Category
+from .base import register
+from ..config import load_config
 
 class HFAPIMetric:
     name = "hf_api"
