@@ -97,7 +97,3 @@ How I verified the changes
 
 - Ran the project's pytest suite inside the virtualenv that I configured for the workspace; all tests passed (35 passed).
 - I intentionally performed small, focused edits and ran tests after the main fixes (imports, MetricResult, register idempotency and package shim).
-
----
-
-If you'd like, I can now produce a single combined patch/PR with all changes and a short README on how to run the CLI and tests. Otherwise tell me which follow-up you prefer and I'll continue.
