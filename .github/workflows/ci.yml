@@ -31,5 +31,9 @@ jobs:
           python -m pip install --upgrade pip setuptools wheel
           # Install the project and dev dependencies so tests and runtime deps are available
           pip install -e ".[dev]"
+          # Hypothesis is used by tests but not listed in dev extras; ensure it's installed
+          pip install hypothesis || true
+          # Make sure the package is importable as a local editable install
+          pip install -e . || true
       - name: Run tests
         run: pytest -q
