@@ -1,12 +1,17 @@
 from __future__ import annotations
 import tempfile, time
 from pathlib import Path
-from huggingface_hub import snapshot_download
-from src.models import MetricResult, Category
-from src.metrics.base import register
+from huggingface_hub import snapshot_download  # type: ignore
+from typing import ClassVar
+try:
+    from src.models import MetricResult, Category  # type: ignore
+    from src.metrics.base import register  # type: ignore
+except Exception:
+    from models import MetricResult, Category  # type: ignore
+    from metrics.base import register  # type: ignore
 
 class LocalRepoMetric:
-    name = "local_repo"
+    name: ClassVar[str] = "local_repo"
 
     def supports(self, url: str, category: Category) -> bool:
         return url.startswith("https://huggingface.co/") and category in ("MODEL", "DATASET")
@@ -15,7 +20,7 @@ class LocalRepoMetric:
         t0 = time.perf_counter()
         namespace, repo = url.rstrip("/").split("/")[3:5]
         with tempfile.TemporaryDirectory() as tmp:
-            local_dir = snapshot_download(repo_id=f"{namespace}/{repo}", local_dir=tmp, local_dir_use_symlinks=False)
+            local_dir = snapshot_download(repo_id=f"{namespace}/{repo}", local_dir=tmp, local_dir_use_symlinks=False)  # type: ignore[call-arg]
             p = Path(local_dir)
             files = [f for f in p.rglob("*") if f.is_file()]
             readme = next((f for f in files if f.name.lower().startswith("readme")), None)

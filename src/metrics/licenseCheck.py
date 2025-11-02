@@ -3,6 +3,37 @@ import re
 import time
 from typing import Tuple
 
+# Integrate as a registered metric so the orchestrator can discover it.
+from models import MetricResult, Category
+from metrics.base import register
+from typing import ClassVar
+
+# Minimal wrapper metric that uses check_license() above to produce a
+# MetricResult. This keeps the existing helper functions usable while also
+# exposing a plugin for the registry.
+class LicenseMetric:
+    name: ClassVar[str] = "license"
+
+    def supports(self, url: str, category: Category) -> bool:
+        # operate on local repo paths for code metrics or HF urls for models/datasets
+        return url.startswith("https://huggingface.co/") or Path(url).exists()
+
+    def compute(self, url: str, category: Category) -> MetricResult:
+        start = time.time()
+        # if url is a HF repo, try to clone or use snapshot in other metrics; here we
+        # are defensive and only support local repo paths in this minimal wrapper.
+        repo_path = url
+        score, latency = check_license(repo_path)
+        latency_ms = int((time.time() - start) * 1000) or latency
+        return MetricResult(
+            name=str(repo_path),
+            category=category,
+            license=score,
+            license_latency=latency_ms,
+        )
+
+register(LicenseMetric())
+
 #licenses compatible with LGPL v2.1
 COMPATIBLE_LICENSES = { 
     "lgpl-2.1", "mit", "apache-2.0", "bsd-2-clause", "bsd-3-clause", "mpl-2.0"

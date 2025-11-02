@@ -7,10 +7,14 @@ import time
 import re
 import tempfile
 from pathlib import Path
-from typing import List, Dict, Set
-from huggingface_hub import snapshot_download
-from src.models import MetricResult, Category
-from src.metrics.base import register
+from typing import List, Dict, Set, ClassVar
+from huggingface_hub import snapshot_download  # type: ignore
+try:
+    from src.models import MetricResult, Category  # type: ignore
+    from src.metrics.base import register  # type: ignore
+except Exception:
+    from models import MetricResult, Category  # type: ignore
+    from metrics.base import register  # type: ignore
 import logging
 
 logger = logging.getLogger(__name__)
@@ -29,7 +33,7 @@ class PerformanceClaimsMetric:
     - Credibility of performance claims
     """
     
-    name = "performance_claims"
+    name: ClassVar[str] = "performance_claims"
     
     def supports(self, url: str, category: Category) -> bool:
         """Check if this metric supports the given URL and category."""
@@ -54,7 +58,7 @@ class PerformanceClaimsMetric:
             # Download repository for analysis
             with tempfile.TemporaryDirectory() as tmp_dir:
                 local_dir = snapshot_download(
-                    repo_id=repo_id,
+                    repo_id=repo_id,  # type: ignore[call-arg]
                     local_dir=tmp_dir,
                     local_dir_use_symlinks=False
                 )

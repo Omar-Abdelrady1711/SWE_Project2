@@ -1,0 +1,4 @@
+# file: C:\Users\~Lucas~\Desktop\github folder\SWE_Project2\src\metrics\dataset_quality.py
+# hypothesis_version: 6.143.0
+
+[0.0, 0.3, 0.7, 1.0, 1000, '/', 'Bad HF dataset URL', 'DATASET', 'README*', 'benchmark', 'citation', 'dataset', 'dataset_quality', 'datasets', 'doi', 'ignore', 'license', 'readme*', 'split', 'test', 'train', 'utf-8', 'validation']

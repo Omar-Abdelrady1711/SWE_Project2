@@ -1,0 +1,4 @@
+# file: C:\Users\~Lucas~\Desktop\github folder\SWE_Project2\src\metrics\licenseCheck.py
+# hypothesis_version: 6.143.0
+
+[0.0, 0.5, 1.0, 1000, '2.1', 'LICENSE', 'LICENSE.md', 'LICENSE.txt', 'README.md', '\\bapache\\b.*\\b2\\.0\\b', '\\bbsd\\b.*\\b2\\b', '\\bbsd\\b.*\\b3\\b', '\\blgpl\\s*[- ]?2\\.1\\b', '\\bmit\\b', 'apache-2.0', 'bsd-2-clause', 'bsd-3-clause', 'ignore', 'lgpl', 'lgpl-2.1', 'license', 'mit', 'mpl-2.0', 'readme', 'unknown', 'utf-8']

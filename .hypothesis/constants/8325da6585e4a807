@@ -1,0 +1,4 @@
+# file: C:\Users\~Lucas~\Desktop\github folder\SWE_Project2\src\config.py
+# hypothesis_version: 6.143.0
+
+['0', '1', '2', 'ACME_WORKERS', 'HF_TOKEN', 'HUGGINGFACE_TOKEN', 'LOG_FILE', 'LOG_LEVEL']

@@ -5,11 +5,18 @@ import logging as logmod
 from pathlib import Path
 from urllib.parse import urlparse
 from tempfile import TemporaryDirectory
+from typing import ClassVar, cast
 
-from huggingface_hub import HfApi, snapshot_download
+from huggingface_hub import HfApi, snapshot_download  # type: ignore
 
-from ..models import MetricResult, Category, SizeScore
-from .base import register
+# Import models/registry with fallbacks so both `src.metrics` and `metrics`
+# import styles work during tests.
+try:
+    from src.models import MetricResult, Category, SizeScore  # type: ignore
+    from src.metrics.base import register  # type: ignore
+except Exception:
+    from models import MetricResult, Category, SizeScore  # type: ignore
+    from metrics.base import register  # type: ignore
 
 log = logmod.getLogger(__name__)
 
@@ -59,7 +66,7 @@ def size_mb_via_snapshot(owner: str, name: str) -> int | None:
     try:
         with TemporaryDirectory() as tmp:
             local = snapshot_download(
-                repo_id=f"{owner}/{name}",
+                    repo_id=f"{owner}/{name}",  # type: ignore[call-arg]
                 repo_type="model",
                 local_dir=tmp,
                 local_dir_use_symlinks=False,
@@ -122,7 +129,7 @@ def scores_from_mb(size_mb: int) -> SizeScore:
     }
 
 class SizeScoreMetric:
-    name = "size_score"
+    name: ClassVar[str] = "size_score"
 
     def supports(self, url, category: Category):
         return category == "MODEL" and url.startswith("https://huggingface.co/")
@@ -136,7 +143,8 @@ class SizeScoreMetric:
             size_mb = size_mb_via_snapshot(owner, name)
 
         if size_mb is None:
-            score_obj: SizeScore = {k: 0.5 for k in THRESHOLDS_MB}  # neutral fallback
+            # neutral fallback: cast to SizeScore for the TypedDict
+            score_obj = cast(SizeScore, {k: 0.5 for k in THRESHOLDS_MB})
         else:
             score_obj = scores_from_mb(size_mb)
 

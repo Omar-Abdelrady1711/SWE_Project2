@@ -6,11 +6,19 @@ from pathlib import Path
 from tempfile import TemporaryDirectory
 from urllib.parse import urlparse
 
-from huggingface_hub import snapshot_download
+from huggingface_hub import snapshot_download  # type: ignore
+from typing import Any, ClassVar, cast
 
-# project imports
-from ..models import MetricResult, Category
-from .base import register 
+# Cast the imported snapshot_download to Any to avoid strict call-arg
+# checking by the language server (the runtime call is unchanged).
+snapshot_download = cast(Any, snapshot_download)
+
+try:
+    from src.models import MetricResult, Category  # type: ignore
+    from src.metrics.base import register  # type: ignore
+except Exception:
+    from models import MetricResult, Category  # type: ignore
+    from metrics.base import register  # type: ignore
 
 KEYS = ("train", "test", "validation", "split", "license", "citation", "doi", "benchmark")
 ALLOW = ["README*", "readme*"]
@@ -34,7 +42,7 @@ def get_readme_text(owner, name):
     try:
         with TemporaryDirectory() as tmp:
             local = snapshot_download(
-                repo_id=f"{owner}/{name}",
+                repo_id=f"{owner}/{name}",  # type: ignore[call-arg]
                 repo_type="dataset",
                 local_dir=tmp,
                 local_dir_use_symlinks=False,
@@ -59,7 +67,7 @@ def score_from_text(text):
 
 # ----- metric class kept tiny; just wires helpers -----
 class DatasetQualityMetric:
-    name = "dataset_quality"
+    name: ClassVar[str] = "dataset_quality"
 
     def supports(self, url, category: Category):
         return category == "DATASET" and url.startswith("https://huggingface.co/")

@@ -1,0 +1,4 @@
+# file: C:\Users\~Lucas~\Desktop\github folder\SWE_Project2\src\metrics\size_score.py
+# hypothesis_version: 6.143.0
+
+[0.0, 0.15, 0.45, 0.5, 0.6, 1.0, 1.6, 8.0, 200, 1000, 2000, 10000, 1000000, '*', '.bin', '.ckpt', '.gguf', '.h5', '.onnx', '.pt', '.safetensors', '/', 'Bad HF model URL', 'MODEL', 'aws_server', 'desktop_pc', 'jetson_nano', 'model', 'raspberry_pi', 'rfilename', 'siblings', 'size', 'size_score']

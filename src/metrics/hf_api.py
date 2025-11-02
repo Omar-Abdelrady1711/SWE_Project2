@@ -1,11 +1,14 @@
 from __future__ import annotations
 import time
 from huggingface_hub import HfApi
-from src.models import MetricResult, Category
-from src.metrics.base import register
+from typing import ClassVar
+# Use top-level imports so the module works when tests import `metrics` directly
+from models import MetricResult, Category
+from metrics.base import register
+from config import load_config
 
 class HFAPIMetric:
-    name = "hf_api"
+    name: ClassVar[str] = "hf_api"
 
     def __init__(self) -> None:
         cfg = load_config()

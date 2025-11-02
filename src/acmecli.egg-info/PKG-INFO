@@ -1,0 +1,15 @@
+Metadata-Version: 2.4
+Name: acmecli
+Version: 0.0.1
+Summary: CLI for trustworthy model reuse
+Requires-Python: >=3.9
+Requires-Dist: typing-extensions>=4.8
+Requires-Dist: huggingface-hub>=0.24.0
+Requires-Dist: orjson>=3.9.0
+Requires-Dist: requests>=2.31.0
+Provides-Extra: dev
+Requires-Dist: pytest>=7.4; extra == "dev"
+Requires-Dist: pytest-cov>=4.1; extra == "dev"
+Requires-Dist: mypy>=1.10; extra == "dev"
+Requires-Dist: flake8>=7.0; extra == "dev"
+Requires-Dist: isort>=5.12; extra == "dev"
