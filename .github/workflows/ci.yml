@@ -18,10 +18,18 @@ jobs:
         uses: actions/setup-python@v4
         with:
           python-version: ${{ matrix.python }}
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('**/requirements.txt', '**/pyproject.toml') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
       - name: Install dependencies
         run: |
           python -m pip install --upgrade pip setuptools wheel
           # Install the project and dev dependencies so tests and runtime deps are available
-          pip install -e "[dev]" || pip install -e .
+          pip install -e ".[dev]"
       - name: Run tests
         run: pytest -q
