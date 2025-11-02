@@ -20,7 +20,8 @@ jobs:
           python-version: ${{ matrix.python }}
       - name: Install dependencies
         run: |
-          python -m pip install --upgrade pip
-          pip install pytest || true
+          python -m pip install --upgrade pip setuptools wheel
+          # Install the project and dev dependencies so tests and runtime deps are available
+          pip install -e "[dev]" || pip install -e .
       - name: Run tests
         run: pytest -q
