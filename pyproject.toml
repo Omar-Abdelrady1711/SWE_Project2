@@ -12,6 +12,10 @@ dependencies = [
   "huggingface-hub>=0.24.0",
   "orjson>=3.9.0",
   "requests>=2.31.0",
+  "fastapi",
+  "uvicorn[standard]",
+  "sqlalchemy",
+  "pydantic>=2,<3",
 ]
 
 [project.optional-dependencies]
