@@ -1,0 +1,30 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: ACME Trustworthy Model Registry - FastAPI on Lambda
+
+Globals:
+  Function:
+    Runtime: python3.12
+    Timeout: 30
+    MemorySize: 512
+
+Resources:
+  RegistryApi:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: bs.src.acemcli.api.main.lambda_handler
+      CodeUri: .
+      Architectures: [x86_64]
+      Policies:
+        - AWSLambdaBasicExecutionRole
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /{proxy+}
+            Method: ANY
+
+Outputs:
+  ApiUrl:
+    Description: Base URL for API Gateway stage
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
