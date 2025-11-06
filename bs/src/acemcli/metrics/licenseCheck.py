@@ -3,6 +3,13 @@ import re
 import time
 from typing import Tuple
 
+# Integration helpers
+from huggingface_hub import snapshot_download
+import tempfile
+from ..models import MetricResult, Category
+from .base import register
+from typing import ClassVar
+
 #licenses compatible with LGPL v2.1
 COMPATIBLE_LICENSES = { 
     "lgpl-2.1", "mit", "apache-2.0", "bsd-2-clause", "bsd-3-clause", "mpl-2.0"
@@ -76,3 +83,54 @@ def check_license(repo_path: str) -> Tuple[float, int]:
 
     latency_ms = int((time.time() - start_time) * 1000)
     return score, latency_ms
+
+
+# --- Metric plugin wrapper (registers with metrics.base) ---
+class LicenseMetric:
+    name: ClassVar[str] = "license"
+
+    def supports(self, url: str, category: Category) -> bool:
+        return url.startswith("https://huggingface.co/") and category in ("MODEL", "DATASET")
+
+    def compute(self, url: str, category: Category) -> MetricResult:
+        start = time.time()
+        namespace = "unknown"
+        repo = "unknown"
+        score = 0.0
+        latency = 0
+        try:
+            parts = url.rstrip("/").split("/")
+            namespace, repo = parts[-2:]
+            repo_id = f"{namespace}/{repo}"
+            with tempfile.TemporaryDirectory() as tmpdir:
+                local_dir = snapshot_download(repo_id=repo_id, local_dir=tmpdir, local_dir_use_symlinks=False)
+                score, latency = check_license(local_dir)
+        except Exception:
+            # Keep score=0.0 on errors
+            latency = int((time.time() - start) * 1000)
+
+        return MetricResult(
+            name=f"{namespace}/{repo}",
+            category=category,
+            net_score=0.0,
+            net_score_latency=0,
+            ramp_up_time=0.0,
+            ramp_up_time_latency=0,
+            bus_factor=0.0,
+            bus_factor_latency=0,
+            performance_claims=0.0,
+            performance_claims_latency=0,
+            license=float(score),
+            license_latency=latency,
+            size_score={"raspberry_pi": 0.0, "jetson_nano": 0.0, "desktop_pc": 0.0, "aws_server": 0.0},
+            size_score_latency=0,
+            dataset_and_code_score=0.0,
+            dataset_and_code_score_latency=0,
+            dataset_quality=0.0,
+            dataset_quality_latency=0,
+            code_quality=0.0,
+            code_quality_latency=0,
+        )
+
+
+register(LicenseMetric())
