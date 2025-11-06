@@ -5,8 +5,12 @@ This file mirrors the top-level `run` behavior for the test harness on Windows.
 import sys
 from pathlib import Path
 
-# ensure package import path: bs/src on sys.path already set by tests, but be defensive
+# ensure package import path: bs/src on sys.path
 ROOT = Path(__file__).resolve().parent
+SRC = ROOT / "src"
+if str(SRC) not in sys.path:
+    # Insert bs/src at front so `import acemcli` succeeds when run from bs/
+    sys.path.insert(0, str(SRC))
 
 def main(argv: list[str]) -> int:
     if len(argv) < 2:

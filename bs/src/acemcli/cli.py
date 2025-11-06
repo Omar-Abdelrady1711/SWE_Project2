@@ -12,11 +12,12 @@ from acemcli.models import Category  # should be Literal["model","dataset","code
 log = logging.getLogger(__name__)
 
 def infer_category(url: str) -> Category:
+    # Return canonical Category literals (uppercase) used across the codebase
     if "/datasets/" in url:
-        return "dataset"
+        return "DATASET"
     if url.startswith("https://huggingface.co/"):
-        return "model"
-    return "code"
+        return "MODEL"
+    return "CODE"
 
 def _is_valid_url(s: str) -> bool:
     try:
@@ -56,7 +57,8 @@ def main(url_file: str) -> int:
             log.warning("skipping invalid URL: %s", s)
             continue
         cat = infer_category(s)
-        if cat == "model":
+        # compute only for models per spec
+        if cat == "MODEL":
             pairs.append((s, cat))
 
     results, errors = compute_all(pairs)
@@ -64,9 +66,18 @@ def main(url_file: str) -> int:
         # print one NDJSON line per model
         print(to_ndjson(res))
 
-    if errors:
-        print(f"{len(errors)} URL(s) failed. See logs for details.", file=sys.stderr)
+    # If we computed at least one result, treat the run as successful even if
+    # some per-URL metric computations failed (they are logged). Only fail if
+    # nothing was produced.
+    if not results:
+        if errors:
+            print(f"{len(errors)} URL(s) failed. See logs for details.", file=sys.stderr)
+        else:
+            print("No results produced.", file=sys.stderr)
         return 1
+
+    if errors:
+        log.warning("%d URL(s) had metric errors; results printed for successful URLs", len(errors))
     return 0
 
 if __name__ == "__main__":

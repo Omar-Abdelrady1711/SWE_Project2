@@ -18,7 +18,15 @@ class HFAPIMetric:
 
     def compute(self, url: str, category: Category) -> MetricResult:
         t0 = time.perf_counter()
-        namespace, repo = url.rstrip("/").split("/")[3:5]
+        # robust parsing: support both owner/name and single-segment model ids
+        repo_id = url.rstrip("/").replace("https://huggingface.co/", "").lstrip("/")
+        if "/" in repo_id:
+            namespace, repo = repo_id.split("/", 1)
+        else:
+            # preserve previous behavior: use hostname as namespace so HF may
+            # resolve the canonical owner via API redirects for single-part IDs
+            namespace = "huggingface.co"
+            repo = repo_id
         is_model = category == "MODEL"
         meta = (
             self.api.model_info(f"{namespace}/{repo}")

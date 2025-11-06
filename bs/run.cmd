@@ -1,2 +1,2 @@
 @echo off
-python -m bs.run %*
+python run.py %*

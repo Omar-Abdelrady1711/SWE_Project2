@@ -11,7 +11,7 @@ import os
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
-RUN = ROOT / "bs" / "run"
+RUN = ROOT / "bs" / ("run.cmd" if os.name == "nt" else "run")
 
 def _make_test_urlfile(tmp_path: Path) -> Path:
     """Create a minimal URL file with one valid model URL."""
