@@ -2,7 +2,7 @@ name: CD - Deploy to AWS (Lambda + API Gateway)
 
 on:
   push:
-    branches: [ main ]
+    branches: [main]
 
 permissions:
   id-token: write
@@ -16,14 +16,15 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    environment: staging
+    # environment: staging
+    timeout-minutes: 20
     steps:
       - uses: actions/checkout@v4
 
       - name: Set up Python
         uses: actions/setup-python@v5
         with:
-          python-version: '3.11'
+          python-version: "3.11"
 
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
@@ -31,8 +32,9 @@ jobs:
           role-to-assume: arn:aws:iam::052747538576:role/GitHubOIDCDeployRole
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Install AWS SAM CLI
-        run: pip install aws-sam-cli
+      - name: Install AWS SAM CLI and AWS CLI
+        run: |
+          pip install awscli aws-sam-cli
 
       - name: Build (SAM)
         run: sam build --use-container
@@ -40,16 +42,16 @@ jobs:
       - name: Deploy (SAM)
         run: |
           sam deploy \
-            --stack-name $STACK_NAME \
-            --s3-bucket $S3_BUCKET \
+            --stack-name ${{ env.STACK_NAME }} \
+            --s3-bucket ${{ env.S3_BUCKET }} \
             --capabilities CAPABILITY_IAM \
             --no-fail-on-empty-changeset \
-            --region $AWS_REGION
+            --region ${{ env.AWS_REGION }}
 
       - name: Fetch API URL and smoke test
         run: |
           URL=$(aws cloudformation describe-stacks \
-            --stack-name $STACK_NAME \
+            --stack-name ${{ env.STACK_NAME }} \
             --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" \
             --output text)
           echo "Deployed API URL: $URL"
