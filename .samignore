@@ -1,0 +1,26 @@
+# Exclude Python virtual environment folders
+
+.venv/
+venv/
+env/
+
+# Exclude source control and related files
+
+.git/
+.gitignore
+.github/
+.svn/
+
+# Exclude compiled Python artifacts
+
+**pycache**/
+_.pyc
+_.pyd
+
+# Exclude local build/testing folders and files
+
+.idea/
+.vscode/
+tests/
+test/
+node_modules/
