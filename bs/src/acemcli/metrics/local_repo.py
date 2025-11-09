@@ -13,7 +13,14 @@ class LocalRepoMetric:
 
     def compute(self, url: str, category: Category) -> MetricResult:
         t0 = time.perf_counter()
-        namespace, repo = url.rstrip("/").split("/")[3:5]
+        repo_id = url.rstrip("/").replace("https://huggingface.co/", "").lstrip("/")
+        if "/" in repo_id:
+            namespace, repo = repo_id.split("/", 1)
+        else:
+            # Use hostname as namespace to preserve prior behavior that allowed
+            # HF API redirects to canonical owners for single-part IDs.
+            namespace = "huggingface.co"
+            repo = repo_id
         with tempfile.TemporaryDirectory() as tmp:
             local_dir = snapshot_download(repo_id=f"{namespace}/{repo}", local_dir=tmp, local_dir_use_symlinks=False)
             p = Path(local_dir)

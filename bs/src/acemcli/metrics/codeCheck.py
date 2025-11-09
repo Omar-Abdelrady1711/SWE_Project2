@@ -26,7 +26,7 @@ class MetricBreakdown:
 
 
 @dataclass
-class MetricResult:
+class CodeQualityResult:
     name: str
     score: float
     latency_ms: int
@@ -510,7 +510,7 @@ def _analyze_code_style(py_files: List[Path]) -> Dict[str, object]:
     return style_issues
 
 
-def score_code_quality(repo_path: str | Path) -> MetricResult:
+def score_code_quality(repo_path: str | Path) -> CodeQualityResult:
     """
     Compute a 0–1 score with breakdown:
       - maintainer_responsiveness (git recency, commits, authors)
@@ -563,7 +563,7 @@ def score_code_quality(repo_path: str | Path) -> MetricResult:
             "weights": weights,
         },
     )
-    return MetricResult(
+    return CodeQualityResult(
         name="code_quality",
         score=round(max(0.0, min(1.0, final)), 3),
         latency_ms=latency_ms,

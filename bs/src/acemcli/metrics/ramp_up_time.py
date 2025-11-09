@@ -17,6 +17,7 @@ import requests
 from huggingface_hub import snapshot_download
 from .base import register
 from ..config import load_config
+from ..models import MetricResult, Category
 
 load_dotenv()
 _cfg = load_config()
@@ -83,11 +84,11 @@ def _ask_llm(readme_text: str) -> float:
 class RampUpTimeMetric:
     name = "ramp_up_time"
 
-    def supports(self, url: str, category: str) -> bool:
+    def supports(self, url: str, category: Category) -> bool:
         return url.startswith("https://huggingface.co/")
 
-    def compute(self, url: str, category: str) -> Dict[str, float]:
-        """Return only the ramp-up score (not a full MetricResult)."""
+    def compute(self, url: str, category: Category) -> MetricResult:
+        """Return a MetricResult with ramp-up score populated."""
         start = time.perf_counter()
         score = 0.0
 
@@ -112,12 +113,18 @@ class RampUpTimeMetric:
         except Exception as e:
             _log(f"Error processing {url}: {e}", 0)
             score = 0.0
-
+        # finalize and return regardless of whether an exception occurred above
         latency_ms = int((time.perf_counter() - start) * 1000)
         score = max(0.0, min(1.0, score))
 
         _log(f"Ramp-up score for {url}: {score:.3f} ({latency_ms} ms)", 1)
-        return {"ramp_up_time": score,"latency_ms": latency_ms}
+        # Return a MetricResult with only the ramp_up_time fields populated.
+        return MetricResult(
+            name=url.replace("https://huggingface.co/", ""),
+            category=("MODEL" if url.startswith("https://huggingface.co/") else "CODE"),
+            ramp_up_time=score,
+            ramp_up_time_latency=latency_ms,
+        )
 
 
 # Register this metric with the system
