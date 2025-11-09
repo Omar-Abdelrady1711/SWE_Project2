@@ -2,6 +2,7 @@ from fastapi import FastAPI, APIRouter, HTTPException, Query
 from fastapi.responses import RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
+from mangum import Mangum
 import time, re, logging
 from typing import Dict, Any, List, Optional
 
@@ -104,3 +105,5 @@ app.include_router(api)
 @app.get("/")
 def root():
     return RedirectResponse(url="/api")
+
+handler = Mangum(app, api_gateway_base_path="/Prod")
