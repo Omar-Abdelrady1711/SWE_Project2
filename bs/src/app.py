@@ -6,15 +6,12 @@ from mangum import Mangum
 import os, time, re, logging
 from typing import Dict, Any, Optional
 
-# ---------- AWS stage name ----------
-STAGE = os.getenv("API_GATEWAY_BASE_PATH", "/Prod")
-
 # ---------- create FastAPI app (Swagger fixed for API Gateway stage) ----------
 app = FastAPI(
     title="Team31 Backend (Phase 2)",
-    docs_url=f"{STAGE}/docs",                 # Swagger UI at /Prod/docs
+    docs_url="/docs",            # -> /Prod/docs
     redoc_url=None,
-    openapi_url=f"{STAGE}/openapi.json",      # Schema served at /Prod/openapi.json
+    openapi_url="/openapi.json", # -> /Prod/openapi.json
 )
 
 api = APIRouter(prefix="/api")
@@ -114,4 +111,4 @@ def root():
     return RedirectResponse(url="/api")
 
 # ---------- AWS Lambda entry ----------
-handler = Mangum(app, api_gateway_base_path=STAGE or None)
+handler = Mangum(app)
