@@ -4,6 +4,13 @@ from fastapi.openapi.docs import get_swagger_ui_html
 from mangum import Mangum
 import os, time, logging
 from typing import Dict, Any, Optional
+from fastapi.middleware.cors import CORSMiddleware
+
+# Define which frontend origins are allowed to call this backend
+origins = [
+    "http://localhost:5173",                #local dev
+    "https://z7rple5yzi.execute-api.us-east-1.amazonaws.com"   # deployed frontend URL
+]
 
 STAGE = os.getenv("API_GATEWAY_BASE_PATH", "/Prod")
 
@@ -14,6 +21,16 @@ app = FastAPI(
     openapi_url="/openapi.json",  # <-- OpenAPI served under the stage
     root_path=STAGE,                      # <-- tell FastAPI it's mounted at /Prod
 )
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,          # allowed domains
+    allow_credentials=True,         # allow cookies / auth headers if needed
+    allow_methods=["*"],            # allow all HTTP methods (GET, POST, etc.)
+    allow_headers=["*"],            # allow all headers (Authorization, Content-Type, etc.)
+)
+
 
 api = APIRouter(prefix="/api")
 
