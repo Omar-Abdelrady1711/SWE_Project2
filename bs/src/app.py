@@ -3,11 +3,22 @@ from fastapi.responses import RedirectResponse
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from mangum import Mangum
-import time, re, logging
+import os, time, re, logging
 from typing import Dict, Any, List, Optional
+from bs.src.api.routes.artifacts import router as artifacts_router
 
-app = FastAPI(title="Team31 Backend (Phase 2)")
+STAGE = os.getenv("API_GATEWAY_BASE_PATH", "/Prod")
+
+app = FastAPI(
+    title="Team31 Backend (Phase 2)",
+    docs_url="/docs",                                      # /Prod/docs in AWS
+    redoc_url=None,
+    openapi_url=(f"{STAGE}/openapi.json" if STAGE else "/openapi.json"),
+)
+
 api = APIRouter(prefix="/api")
+
+api.include_router(artifacts_router, prefix="/artifacts", tags=["artifacts"])
 
 # ---------- very simple in-memory store ----------
 STORE: Dict[str, Any] = {"artifacts": [], "_next_id": 1}
@@ -106,4 +117,4 @@ app.include_router(api)
 def root():
     return RedirectResponse(url="/api")
 
-handler = Mangum(app, api_gateway_base_path="/Prod")
+handler = Mangum(app, api_gateway_base_path=STAGE or None)

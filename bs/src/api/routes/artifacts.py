@@ -1,7 +1,7 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
-from src.schemas import Artifact, ArtifactCreate
-from src.models_db import ArtifactModel, get_session
+from bs.src.schemas import Artifact, ArtifactCreate
+from bs.src.models_db import ArtifactModel, get_session
 
 router = APIRouter()
 

@@ -55,4 +55,4 @@ jobs:
             --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" \
             --output text)
           echo "Deployed API URL: $URL"
-          curl -fsS "$URL/health"
+          curl -fsS "$URL/api/health"
