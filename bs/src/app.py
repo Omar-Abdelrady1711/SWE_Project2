@@ -5,6 +5,13 @@ from starlette.requests import Request
 from mangum import Mangum
 import os, time, re, logging
 from typing import Dict, Any, Optional
+from fastapi.middleware.cors import CORSMiddleware
+
+# Define which frontend origins are allowed to call this backend
+origins = [
+    "http://localhost:5173",                #local dev
+    "https://z7rple5yzi.execute-api.us-east-1.amazonaws.com"   # deployed frontend URL
+]
 
 # ---------- create FastAPI app (Swagger fixed for API Gateway stage) ----------
 app = FastAPI(
@@ -13,6 +20,16 @@ app = FastAPI(
     redoc_url=None,
     openapi_url="/openapi.json", # -> /Prod/openapi.json
 )
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins,          # allowed domains
+    allow_credentials=True,         # allow cookies / auth headers if needed
+    allow_methods=["*"],            # allow all HTTP methods (GET, POST, etc.)
+    allow_headers=["*"],            # allow all headers (Authorization, Content-Type, etc.)
+)
+
 
 api = APIRouter(prefix="/api")
 
