@@ -12,7 +12,7 @@ Resources:
   RegistryApi:
     Type: AWS::Serverless::Function
     Properties:
-      Handler: bs.src.acemcli.api.main.lambda_handler
+      Handler: bs.src.app.handler
       CodeUri: .
       Architectures: [x86_64]
       Policies:
