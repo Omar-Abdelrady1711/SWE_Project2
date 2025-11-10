@@ -1,7 +1,17 @@
+# bs/src/models_db.py
+import os
+from pathlib import Path
 from sqlalchemy import Column, Integer, String, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
 
-DATABASE_URL = "sqlite:///./registry.db"   # local file next to bs/
+# Writable on AWS Lambda
+DB_DIR = Path("/tmp")
+DB_DIR.mkdir(parents=True, exist_ok=True)
+DB_PATH = DB_DIR / "registry.db"
+
+# Allow override via env if you later move to RDS/other DB
+DATABASE_URL = os.getenv("DATABASE_URL", f"sqlite:///{DB_PATH}")
+
 engine = create_engine(DATABASE_URL, connect_args={"check_same_thread": False})
 SessionLocal = sessionmaker(bind=engine, autocommit=False, autoflush=False)
 
@@ -15,9 +25,9 @@ class ArtifactModel(Base):
     description = Column(String, nullable=True)
 
 def init_db() -> None:
+    # Safe to call more than once; creates table if missing
     Base.metadata.create_all(bind=engine)
 
-# <-- THIS is what your router imports
 def get_session() -> Session:
     db = SessionLocal()
     try:

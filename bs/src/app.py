@@ -13,7 +13,7 @@ app = FastAPI(
     title="Team31 Backend (Phase 2)",
     docs_url="/docs",                                      # /Prod/docs in AWS
     redoc_url=None,
-    openapi_url=(f"{STAGE}/openapi.json" if STAGE else "/openapi.json"),
+    openapi_url="/openapi.json",
 )
 
 api = APIRouter(prefix="/api")
@@ -37,9 +37,13 @@ def health():
     return {"status": "ok", "phase": 2, "time": time.time()}
 
 try:
+    from bs.src.models_db import init_db
+    init_db()  # create tables on cold start
+
     from bs.src.api.routes.artifacts import router as artifacts_router
     api.include_router(artifacts_router, prefix="/artifacts", tags=["artifacts"])
 except Exception as e:
+    import logging
     logging.getLogger(__name__).warning("Artifacts router not loaded: %s", e)
     
 @api.get("/tracks")
