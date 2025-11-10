@@ -5,7 +5,7 @@ from starlette.requests import Request
 from mangum import Mangum
 import os, time, re, logging
 from typing import Dict, Any, List, Optional
-from bs.src.api.routes.artifacts import router as artifacts_router
+
 
 STAGE = os.getenv("API_GATEWAY_BASE_PATH", "/Prod")
 
@@ -17,8 +17,6 @@ app = FastAPI(
 )
 
 api = APIRouter(prefix="/api")
-
-api.include_router(artifacts_router, prefix="/artifacts", tags=["artifacts"])
 
 # ---------- very simple in-memory store ----------
 STORE: Dict[str, Any] = {"artifacts": [], "_next_id": 1}
@@ -38,6 +36,12 @@ app.add_middleware(RequestLogMiddleware)
 def health():
     return {"status": "ok", "phase": 2, "time": time.time()}
 
+try:
+    from bs.src.api.routes.artifacts import router as artifacts_router
+    api.include_router(artifacts_router, prefix="/artifacts", tags=["artifacts"])
+except Exception as e:
+    logging.getLogger(__name__).warning("Artifacts router not loaded: %s", e)
+    
 @api.get("/tracks")
 def tracks():
     # include access_control so that “Unable to Login” dependency is unblocked

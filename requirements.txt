@@ -5,3 +5,4 @@ typing-extensions>=4.8
 huggingface-hub>=0.24.0
 orjson>=3.9.0
 requests>=2.31.0
+sqlalchemy>=2.0
