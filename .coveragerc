@@ -1,0 +1,11 @@
+[run]
+source =
+    bs/src/app.py
+    bs/src/api
+    bs/src/models_db.py
+    bs/src/schemas.py
+omit =
+    bs/src/acemcli/*
+    bs/src/orchestrator.py
+    bs/src/test_logging.py
+    bs/quick_test_task33.py
