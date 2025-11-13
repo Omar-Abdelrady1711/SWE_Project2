@@ -34,9 +34,16 @@ app.add_middleware(
 
 api = APIRouter(prefix="/api")
 
+def health_response():
+    return {"status": "ok", "phase": 2, "time": time.time()}
+
 @api.get("/health")
 def api_health():
-    return {"status": "ok", "phase": 2, "time": time.time()}
+    return health_response()
+
+@app.get("/health")
+def root_health():
+    return health_response()
 
 # (safe-load your DB router exactly as you had)
 try:
