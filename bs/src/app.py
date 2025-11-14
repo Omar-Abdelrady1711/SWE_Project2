@@ -5,6 +5,7 @@ from mangum import Mangum
 import os, time, logging, urllib.parse
 from typing import Dict, Any, Optional, List
 from fastapi.middleware.cors import CORSMiddleware
+import re
 
 from sqlalchemy.orm import Session
 
@@ -114,7 +115,6 @@ def reset_system(x_authorization: str | None = Header(default=None)):
     return {"status": "reset"}
 
 # -------- Phase 2: /artifacts and /artifact endpoints --------
-
 @app.post("/artifacts", response_model=List[ArtifactMetadataOut])
 def list_artifacts_phase2(
     queries: List[ArtifactQueryIn],
@@ -125,30 +125,47 @@ def list_artifacts_phase2(
     """
     Phase 2: POST /artifacts
 
-    - `queries` is an array of ArtifactQuery objects.
+    - `queries` is an array of ArtifactQueryIn objects.
+    - `name` is treated as a REGEX over artifact name/description.
     - To list everything, the autograder will send: [{"name": "*"}].
     - We ignore offset and X-Authorization for now.
     """
     if not queries:
         raise HTTPException(status_code=400, detail="At least one query is required")
 
-    # For baseline, we just use the first query.
+    # For Phase 2, just honor the first query
     q = queries[0]
 
+    # Start with type filtering in the DB
     query = db.query(ArtifactModel)
-
-    if q.name != "*":
-        query = query.filter(ArtifactModel.name == q.name)
-
     if q.types:
         query = query.filter(ArtifactModel.type.in_(q.types))
 
-    artifacts = query.all()
+    all_candidates = query.all()
+
+    # If name is "*" or empty → no regex filtering, just return everything (within types)
+    if not q.name or q.name == "*":
+        matched = all_candidates
+    else:
+        # Treat q.name as a regular expression over name / description
+        try:
+            pattern = re.compile(q.name)
+        except re.error:
+            # If they send an invalid regex, fall back to literal match
+            pattern = re.compile(re.escape(q.name))
+
+        matched = []
+        for a in all_candidates:
+            text_name = a.name or ""
+            text_desc = a.description or ""
+            if pattern.search(text_name) or pattern.search(text_desc):
+                matched.append(a)
 
     return [
         ArtifactMetadataOut(name=a.name, id=str(a.id), type=a.type)
-        for a in artifacts
+        for a in matched
     ]
+
 
 @app.post("/artifact/{artifact_type}", response_model=ArtifactOut, status_code=201)
 def ingest_artifact_phase2(
