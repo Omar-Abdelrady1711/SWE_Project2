@@ -210,3 +210,28 @@ def get_artifact_phase2(
 
     return ArtifactOut(metadata=metadata, data=data)
 
+@app.get("/artifact/{artifact_type}/{id}", response_model=ArtifactOut)
+def get_artifact_phase2_singular(
+    artifact_type: str,
+    id: str,
+    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
+    db: Session = Depends(get_session),
+):
+    """
+    Phase 2: GET /artifact/{artifact_type}/{id}
+    Return full artifact (metadata + data.url).
+    """
+    try:
+        int_id = int(id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid artifact id")
+
+    obj = db.get(ArtifactModel, int_id)
+    if not obj or obj.type != artifact_type:
+        raise HTTPException(status_code=404, detail="Artifact does not exist")
+
+    metadata = ArtifactMetadataOut(name=obj.name, id=str(obj.id), type=obj.type)
+    data = {"url": obj.url} if obj.url else {}
+
+    return ArtifactOut(metadata=metadata, data=data)
+
