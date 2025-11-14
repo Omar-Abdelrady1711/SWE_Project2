@@ -4,6 +4,7 @@ from fastapi.openapi.docs import get_swagger_ui_html
 from mangum import Mangum
 import os, time, logging, urllib.parse
 from typing import Dict, Any, Optional, List
+import re
 from fastapi.middleware.cors import CORSMiddleware
 
 from sqlalchemy.orm import Session
