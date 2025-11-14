@@ -23,6 +23,7 @@ class ArtifactModel(Base):
     name = Column(String, nullable=False, index=True)
     type = Column(String, nullable=False)
     description = Column(String, nullable=True)
+    url = Column(String, nullable=True)
 
 def init_db() -> None:
     # Safe to call more than once; creates table if missing
