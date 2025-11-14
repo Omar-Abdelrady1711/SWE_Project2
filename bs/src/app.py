@@ -5,6 +5,8 @@ from mangum import Mangum
 import os, time, logging
 from typing import Dict, Any, Optional
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi import FastAPI, APIRouter, Header
+from bs.src.models_db import init_db, reset_db  
 
 # Define which frontend origins are allowed to call this backend
 origins = [
@@ -84,3 +86,21 @@ def custom_docs_under_api():
     )
 
 handler = Mangum(app, api_gateway_base_path=STAGE)
+
+@app.get("/tracks")
+def get_tracks():
+    # We are not doing any special track yet, so just return empty list.
+    # (If later you do Access control or Performance, add them here.)
+    return {"plannedTracks": []}
+
+
+@app.delete("/reset")
+def reset_system(x_authorization: str | None = Header(default=None)):
+    """
+    Reset the registry to an empty state.
+
+    - Ignore X-Authorization for now (we're not doing access-control track).
+    - Clear all artifacts from the DB.
+    """
+    reset_db()
+    return {"status": "reset"}

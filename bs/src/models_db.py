@@ -34,3 +34,14 @@ def get_session() -> Session:
         yield db
     finally:
         db.close()
+
+def reset_db() -> None:
+    """
+    Drop and recreate all tables.
+
+    Used by the /reset endpoint to wipe all artifacts so the system
+    is in a clean state for the autograder.
+    """
+    Base.metadata.drop_all(bind=engine)
+    Base.metadata.create_all(bind=engine)
+
