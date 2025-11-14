@@ -21,20 +21,8 @@ def get_artifact(artifact_id: int, db: Session = Depends(get_session)):
     return obj
 
 @router.get("", response_model=list[Artifact])
-def list_artifacts(
-    regex: str | None = None,
-    name: str | None = None,
-    db: Session = Depends(get_session)
-):
-    query = db.query(ArtifactModel)
-
-    if name:
-        query = query.filter(ArtifactModel.name == name)
-
-    if regex:
-        query = query.filter(ArtifactModel.name.op("REGEXP")(regex))
-
-    return query.all()
+def list_artifacts(db: Session = Depends(get_session)):
+    return db.query(ArtifactModel).all()
 
 @router.put("/{artifact_id}", response_model=Artifact)
 def update_artifact(artifact_id: int, payload: ArtifactCreate, db: Session = Depends(get_session)):
@@ -54,14 +42,3 @@ def delete_artifact(artifact_id: int, db: Session = Depends(get_session)):
     db.delete(obj)
     db.commit()
     return None
-
-@router.get("/{artifact_type}/{artifact_id}", response_model=Artifact)
-def get_artifact_by_type(
-    artifact_type: str,
-    artifact_id: int,
-    db: Session = Depends(get_session)
-):
-    obj = db.get(ArtifactModel, artifact_id)
-    if not obj or obj.type != artifact_type:
-        raise HTTPException(status_code=404, detail="Not found")
-    return obj

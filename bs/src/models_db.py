@@ -3,7 +3,6 @@ import os
 from pathlib import Path
 from sqlalchemy import Column, Integer, String, create_engine
 from sqlalchemy.orm import declarative_base, sessionmaker, Session
-import re 
 
 # Writable on AWS Lambda
 DB_DIR = Path("/tmp")
@@ -46,8 +45,4 @@ def reset_db() -> None:
     """
     Base.metadata.drop_all(bind=engine)
     Base.metadata.create_all(bind=engine)
-
-@event.listens_for(engine, "connect")
-def sqlite_regexp(connection, connection_record):
-    connection.create_function("REGEXP", 2, lambda expr, item: 1 if item and re.search(expr, item) else 0)
 
