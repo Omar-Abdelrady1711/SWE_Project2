@@ -17,8 +17,6 @@ from bs.src.schemas import (
     ArtifactOut,
 )
 
-ID_PATTERN = re.compile(r"^[a-zA-Z0-9\-]+$")
-
 # Define which frontend origins are allowed to call this backend
 origins = [
     "http://localhost:5173",                #local dev
@@ -200,9 +198,6 @@ def ingest_artifact_phase2(
 
     return ArtifactOut(metadata=metadata, data=data)
 
-VALID_TYPES = {"model", "dataset", "code"}
-
-
 @app.post("/artifact/byRegEx", response_model=List[ArtifactMetadataOut])
 def artifact_by_regex(
     payload: ArtifactRegExIn,
@@ -212,34 +207,28 @@ def artifact_by_regex(
     """
     POST /artifact/byRegEx
 
-    Search for artifacts whose name or README/description matches the given regex.
+    Search for artifacts whose name or description matches the given regex.
     """
-
-    # 1) Empty / whitespace-only regex ⇒ 400 (invalid)
-    if not payload.regex or payload.regex.strip() == "":
-        raise HTTPException(status_code=400, detail="Invalid artifact_regex")
-
-    # 2) Malformed regex ⇒ 400
+    # Compile the regex
     try:
         pattern = re.compile(payload.regex)
     except re.error:
+        # Spec: 400 for malformed or invalid regex
         raise HTTPException(status_code=400, detail="Invalid artifact_regex")
 
-    # 3) Search over name + description (+ readme_content if present)
     matches: list[ArtifactModel] = []
+
     for a in db.query(ArtifactModel).all():
+        # We don't have READMEs, but we can search name + description
         text_name = a.name or ""
-        text_desc = getattr(a, "description", "") or ""
-        text_readme = getattr(a, "readme_content", "") or ""
-        haystack = f"{text_name}\n{text_desc}\n{text_readme}"
-        if pattern.search(haystack):
+        text_desc = a.description or ""
+        if pattern.search(text_name) or pattern.search(text_desc):
             matches.append(a)
 
-    # 4) No matches ⇒ 404
     if not matches:
+        # Spec: 404 when no artifact found under this regex
         raise HTTPException(status_code=404, detail="No artifact found under this regex")
 
-    # 5) At least one match ⇒ 200 + list of ArtifactMetadata
     return [
         ArtifactMetadataOut(name=a.name, id=str(a.id), type=a.type)
         for a in matches
@@ -258,33 +247,40 @@ def get_artifact_phase2(
 
     Return full artifact (metadata + data.url).
     """
-
-    # 1) Validate artifact_type
-    if artifact_type not in VALID_TYPES:
-        raise HTTPException(status_code=400, detail="Invalid artifact_type")
-
-    # 2) Validate artifact_id format
-    if not id or not ID_PATTERN.match(id):
-        raise HTTPException(status_code=400, detail="Invalid artifact_id")
-
-    # our DB uses integer primary key, but the spec's ArtifactID is a string.
-    # autograder uses numeric strings like "3847247294", so we parse as int.
     try:
         int_id = int(id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid artifact_id")
+        raise HTTPException(status_code=400, detail="Invalid artifact id")
 
-    # 3) Look up artifact
     obj = db.get(ArtifactModel, int_id)
-    if not obj:
-        # valid id format, but doesn't exist => 404
+    if not obj or obj.type != artifact_type:
         raise HTTPException(status_code=404, detail="Artifact does not exist")
 
-    # 4) If id exists but type doesn't match ⇒ 400
-    if obj.type != artifact_type:
-        raise HTTPException(status_code=400, detail="artifact_type does not match artifact")
+    metadata = ArtifactMetadataOut(name=obj.name, id=str(obj.id), type=obj.type)
+    data = {"url": obj.url} if obj.url else {}
 
-    # 5) Build response
+    return ArtifactOut(metadata=metadata, data=data)
+
+@app.get("/artifact/{artifact_type}/{id}", response_model=ArtifactOut)
+def get_artifact_phase2_singular(
+    artifact_type: str,
+    id: str,
+    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
+    db: Session = Depends(get_session),
+):
+    """
+    Phase 2: GET /artifact/{artifact_type}/{id}
+    Return full artifact (metadata + data.url).
+    """
+    try:
+        int_id = int(id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid artifact id")
+
+    obj = db.get(ArtifactModel, int_id)
+    if not obj or obj.type != artifact_type:
+        raise HTTPException(status_code=404, detail="Artifact does not exist")
+
     metadata = ArtifactMetadataOut(name=obj.name, id=str(obj.id), type=obj.type)
     data = {"url": obj.url} if obj.url else {}
 
