@@ -4,10 +4,10 @@ import logging
 from pathlib import Path
 from urllib.parse import urlparse
 
-from acemcli.logging_setup import setup_logging
-from acemcli.config import load_config
-from acemcli.orchestrator import compute_all, to_ndjson
-from acemcli.models import Category  # should be Literal["model","dataset","code"]
+from .logging_setup import setup_logging
+from .config import load_config
+from .orchestrator import compute_all, to_ndjson
+from .models import Category
 
 log = logging.getLogger(__name__)
 
