@@ -55,7 +55,10 @@ jobs:
             --query "Stacks[0].Outputs[?OutputKey=='ApiUrl'].OutputValue" \
             --output text)
           echo "Deployed API URL: $URL"
-          curl -fsS "$URL/api/health"
+
+          echo "Running smoke test on $URL/health"
+          # Use -f so curl fails on non-2xx, but show verbose output for debugging
+          curl -fv "$URL/health"
       - name: Tail Lambda logs on failure
         if: failure()
         continue-on-error: true
