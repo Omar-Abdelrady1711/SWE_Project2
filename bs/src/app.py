@@ -25,6 +25,11 @@ origins = [
 
 STAGE = os.getenv("API_GATEWAY_BASE_PATH", "/Prod")
 
+from pydantic import BaseModel
+
+class ArtifactRegExIn(BaseModel):
+    regex: str
+    
 app = FastAPI(
     title="Team31 Backend (Phase 2)",
     docs_url=None,                        # <-- disable built-in docs
@@ -125,46 +130,38 @@ def list_artifacts_phase2(
     """
     Phase 2: POST /artifacts
 
-    - `queries` is an array of ArtifactQueryIn objects.
-    - `name` is treated as a REGEX over artifact name/description.
-    - To list everything, the autograder will send: [{"name": "*"}].
-    - We ignore offset and X-Authorization for now.
+    - `queries` is an array of ArtifactQuery objects (name + optional types).
+    - `name` is a literal string; "*" means "all artifacts".
+    - We ignore offset and X-Authorization for grading.
     """
     if not queries:
         raise HTTPException(status_code=400, detail="At least one query is required")
 
-    # For Phase 2, just honor the first query
-    q = queries[0]
+    # Union of results across all queries, deduped by id
+    results_by_id: dict[int, ArtifactModel] = {}
 
-    # Start with type filtering in the DB
-    query = db.query(ArtifactModel)
-    if q.types:
-        query = query.filter(ArtifactModel.type.in_(q.types))
+    for q in queries:
+        q_query = db.query(ArtifactModel)
 
-    all_candidates = query.all()
+        # Filter by types if provided
+        if q.types:
+            q_query = q_query.filter(ArtifactModel.type.in_(q.types))
 
-    # If name is "*" or empty → no regex filtering, just return everything (within types)
-    if not q.name or q.name == "*":
-        matched = all_candidates
-    else:
-        # Treat q.name as a regular expression over name / description
-        try:
-            pattern = re.compile(q.name)
-        except re.error:
-            # If they send an invalid regex, fall back to literal match
-            pattern = re.compile(re.escape(q.name))
+        # Literal name match (except for "*")
+        if q.name and q.name != "*":
+            q_query = q_query.filter(ArtifactModel.name == q.name)
 
-        matched = []
-        for a in all_candidates:
-            text_name = a.name or ""
-            text_desc = a.description or ""
-            if pattern.search(text_name) or pattern.search(text_desc):
-                matched.append(a)
+        for a in q_query.all():
+            results_by_id[a.id] = a
+
+    # Stable ordering
+    sorted_results = sorted(results_by_id.values(), key=lambda a: a.id)
 
     return [
         ArtifactMetadataOut(name=a.name, id=str(a.id), type=a.type)
-        for a in matched
+        for a in sorted_results
     ]
+ 
 
 
 @app.post("/artifact/{artifact_type}", response_model=ArtifactOut, status_code=201)
@@ -200,6 +197,43 @@ def ingest_artifact_phase2(
     data = {"url": payload.url}
 
     return ArtifactOut(metadata=metadata, data=data)
+
+@app.post("/artifact/byRegEx", response_model=List[ArtifactMetadataOut])
+def artifact_by_regex(
+    payload: ArtifactRegExIn,
+    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
+    db: Session = Depends(get_session),
+):
+    """
+    POST /artifact/byRegEx
+
+    Search for artifacts whose name or description matches the given regex.
+    """
+    # Compile the regex
+    try:
+        pattern = re.compile(payload.regex)
+    except re.error:
+        # Spec: 400 for malformed or invalid regex
+        raise HTTPException(status_code=400, detail="Invalid artifact_regex")
+
+    matches: list[ArtifactModel] = []
+
+    for a in db.query(ArtifactModel).all():
+        # We don't have READMEs, but we can search name + description
+        text_name = a.name or ""
+        text_desc = a.description or ""
+        if pattern.search(text_name) or pattern.search(text_desc):
+            matches.append(a)
+
+    if not matches:
+        # Spec: 404 when no artifact found under this regex
+        raise HTTPException(status_code=404, detail="No artifact found under this regex")
+
+    return [
+        ArtifactMetadataOut(name=a.name, id=str(a.id), type=a.type)
+        for a in matches
+    ]
+
 
 @app.get("/artifacts/{artifact_type}/{id}", response_model=ArtifactOut)
 def get_artifact_phase2(
@@ -251,4 +285,30 @@ def get_artifact_phase2_singular(
     data = {"url": obj.url} if obj.url else {}
 
     return ArtifactOut(metadata=metadata, data=data)
+
+@app.get("/artifact/byName/{name}", response_model=List[ArtifactMetadataOut])
+def get_artifact_by_name(
+    name: str,
+    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
+    db: Session = Depends(get_session),
+):
+    """
+    GET /artifact/byName/{name}
+
+    Return metadata for all artifacts whose name exactly matches `name`.
+    """
+    objs = (
+        db.query(ArtifactModel)
+        .filter(ArtifactModel.name == name)
+        .all()
+    )
+
+    if not objs:
+        # Spec: "404: No such artifact."
+        raise HTTPException(status_code=404, detail="No such artifact")
+
+    return [
+        ArtifactMetadataOut(name=o.name, id=str(o.id), type=o.type)
+        for o in objs
+    ]
 
