@@ -45,15 +45,5 @@ class MetricResult:
 
     code_quality: float = 0.0
     code_quality_latency: int = 0
-    
-    # NEW for Phase 2:
-    reproducibility: float = 0.0
-    reproducibility_latency: int = 0
-
-    reviewedness: float = 0.0
-    reviewedness_latency: int = 0
-
-    tree_score: float = 0.0
-    tree_score_latency: int = 0
 
     extras: Dict[str, float] = field(default_factory=dict)

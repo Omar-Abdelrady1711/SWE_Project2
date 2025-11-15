@@ -6,9 +6,9 @@ from typing import Iterable, List, Tuple
 
 import orjson
 
-from .metrics.base import all_metrics
-from .models import MetricResult, Category
-from .config import load_config
+from acemcli.metrics.base import all_metrics
+from acemcli.models import MetricResult, Category
+from acemcli.config import load_config
 
 log = logging.getLogger(__name__)
 
@@ -147,29 +147,6 @@ def to_ndjson(res: MetricResult) -> str:
         "dataset_quality_latency": res.dataset_quality_latency,
         "code_quality": res.code_quality,
         "code_quality_latency": res.code_quality_latency,
-        "tree_score": res.tree_score,
-        "tree_score_latency": res.tree_score_latency,
-        "reproducibility": res.reproducibility,
-        "reproducibility_latency": res.reproducibility_latency,
-        "reviewedness": res.reviewedness,
-        "reviewedness_latency": res.reviewedness_latency,
     }
     # Return a text line (the CLI will print it).
     return orjson.dumps(payload).decode("utf-8")
-
-def compute_for_single(url: str, category: Category) -> MetricResult:
-    """
-    Convenience wrapper to compute metrics for a single (url, category)
-    using the same pipeline as compute_all (including error handling).
-    """
-    results, errors = compute_all([(url, category)])
-
-    if errors:
-        # take the first error and raise – your FastAPI route can catch this
-        err_url, msg = errors[0]
-        raise RuntimeError(f"Metric computation failed for {err_url}: {msg}")
-
-    if not results:
-        raise RuntimeError(f"No metrics produced for {url}")
-
-    return results[0]
