@@ -6,6 +6,7 @@ import os, time, logging, urllib.parse
 from typing import Dict, Any, Optional, List
 from fastapi.middleware.cors import CORSMiddleware
 import re
+from bs.src.api.routes.rating import router as rating_router
 
 from sqlalchemy.orm import Session
 
@@ -311,4 +312,6 @@ def get_artifact_by_name(
         ArtifactMetadataOut(name=o.name, id=str(o.id), type=o.type)
         for o in objs
     ]
+
+app.include_router(rating_router)
 
