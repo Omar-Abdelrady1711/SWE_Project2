@@ -6,9 +6,9 @@ from typing import Iterable, List, Tuple
 
 import orjson
 
-from acemcli.metrics.base import all_metrics
-from acemcli.models import MetricResult, Category
-from acemcli.config import load_config
+from .metrics.base import all_metrics
+from .models import MetricResult, Category
+from .config import load_config
 
 log = logging.getLogger(__name__)
 
