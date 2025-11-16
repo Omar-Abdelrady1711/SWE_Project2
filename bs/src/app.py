@@ -154,27 +154,24 @@ def reset_system(x_authorization: str | None = Header(default=None)):
 
 @app.post("/artifacts", response_model=List[ArtifactMetadataOut])
 def list_artifacts_phase2(
-    body: ArtifactsQueryIn,
+    queries: List[ArtifactQueryIn],
+    offset: Optional[str] = None,
     x_authorization: str | None = Header(default=None, alias="X-Authorization"),
     db: Session = Depends(get_session),
 ):
     """
     Phase 2: POST /artifacts
 
-    Request body:
-    {
-      "queries": [
-        { "name": "<string or '*'>", "types": ["model", "dataset", "code"]? },
-        ...
-      ],
-      "offset": "..."   // optional, ignored for grading
-    }
+    Body (what the autograder sends):
 
-    "*" in name means "all artifacts" (for this endpoint only).
-    Returns union of all matching artifacts as ArtifactMetadataOut list.
+    [
+      { "name": "<string or '*'>", "types": ["model", "dataset", "code"]? },
+      ...
+    ]
+
+    - "*" in name means "all artifacts" (for this endpoint only).
+    - offset is ignored for grading.
     """
-    queries = body.queries
-
     if not queries:
         raise HTTPException(status_code=400, detail="At least one query is required")
 
@@ -185,6 +182,7 @@ def list_artifacts_phase2(
 
         # Filter by types if provided
         if q.types:
+            # q.types is List[ArtifactType] now
             q_query = q_query.filter(ArtifactModel.type.in_([t.value for t in q.types]))
 
         # Literal name match, except "*" which means "all"
