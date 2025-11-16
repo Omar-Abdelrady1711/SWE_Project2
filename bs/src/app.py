@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, Header, Depends, HTTPException
+from fastapi import FastAPI, APIRouter, Header, Depends, HTTPException, Body
 from fastapi.responses import RedirectResponse
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.middleware.cors import CORSMiddleware
@@ -200,6 +200,41 @@ def list_artifacts_phase2(
     ]
 
 
+
+@app.post("/artifact/byRegEx", response_model=List[ArtifactMetadataOut])
+def artifact_by_regex(
+    payload: ArtifactRegExIn,
+    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
+    db: Session = Depends(get_session),
+):
+    """
+    POST /artifact/byRegEx
+
+    Body: { "regex": "<pattern>" }
+
+    Search over artifact names and descriptions.
+    """
+    try:
+        pattern = re.compile(payload.regex)
+    except re.error:
+        raise HTTPException(status_code=400, detail="Invalid artifact_regex")
+
+    matches: List[ArtifactModel] = []
+
+    for a in db.query(ArtifactModel).all():
+        text_name = a.name or ""
+        text_desc = a.description or ""
+        if pattern.search(text_name) or pattern.search(text_desc):
+            matches.append(a)
+
+    if not matches:
+        raise HTTPException(status_code=404, detail="No artifact found under this regex")
+
+    return [
+        ArtifactMetadataOut(name=a.name, id=str(a.id), type=ArtifactType(a.type))
+        for a in matches
+    ]
+
 @app.post("/artifact/{artifact_type}", response_model=ArtifactOut, status_code=201)
 def ingest_artifact_phase2(
     artifact_type: str,
@@ -234,81 +269,6 @@ def ingest_artifact_phase2(
     data: Dict[str, Any] = {"url": payload.url}
 
     return ArtifactOut(metadata=metadata, data=data)
-
-
-@app.post("/artifact/byRegEx", response_model=List[ArtifactMetadataOut])
-def artifact_by_regex(
-    payload: ArtifactRegExIn,
-    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
-    db: Session = Depends(get_session),
-):
-    """
-    POST /artifact/byRegEx
-
-    Body: { "regex": "<pattern>" }
-
-    Search over artifact names and descriptions.
-
-    Spec:
-      - 200: list of ArtifactMetadata on match
-      - 400: malformed/invalid regex
-      - 404: no artifact matches this regex
-    """
-    try:
-        pattern = re.compile(payload.regex)
-    except re.error:
-        raise HTTPException(status_code=400, detail="Invalid artifact_regex")
-
-    matches: List[ArtifactModel] = []
-
-    for a in db.query(ArtifactModel).all():
-        text_name = a.name or ""
-        text_desc = a.description or ""
-        if pattern.search(text_name) or pattern.search(text_desc):
-            matches.append(a)
-
-    if not matches:
-        raise HTTPException(status_code=404, detail="No artifact found under this regex")
-
-    return [
-        ArtifactMetadataOut(name=a.name, id=str(a.id), type=ArtifactType(a.type))
-        for a in matches
-    ]
-
-
-def _get_artifact_by_type_and_id(
-    artifact_type: str,
-    id: str,
-    db: Session,
-) -> ArtifactOut:
-    """
-    Shared logic for:
-      - GET /artifacts/{artifact_type}/{id}
-      - GET /artifact/{artifact_type}/{id} (alias)
-    """
-    # Validate artifact_type
-    if artifact_type not in VALID_TYPES:
-        raise HTTPException(status_code=400, detail="Invalid artifact_type")
-
-    # Validate ID pattern ^[A-Za-z0-9\-]+$
-    if not ID_PATTERN.fullmatch(id):
-        raise HTTPException(status_code=400, detail="Invalid artifact id")
-
-    # Our DB uses integer PKs; autograder sends numeric IDs.
-    if not id.isdigit():
-        raise HTTPException(status_code=400, detail="Invalid artifact id")
-
-    int_id = int(id)
-
-    obj = db.get(ArtifactModel, int_id)
-    if not obj or obj.type != artifact_type:
-        raise HTTPException(status_code=404, detail="Artifact does not exist")
-
-    metadata = ArtifactMetadataOut(name=obj.name, id=str(obj.id), type=ArtifactType(obj.type))
-    data: Dict[str, Any] = {"url": obj.url} if obj.url else {}
-
-    return ArtifactOut(metadata=metadata, data=data)
-
 
 @app.get("/artifacts/{artifact_type}/{id}", response_model=ArtifactOut)
 def get_artifact_phase2(
