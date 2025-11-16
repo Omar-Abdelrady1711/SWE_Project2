@@ -1,32 +1,39 @@
 from pydantic import BaseModel, ConfigDict, HttpUrl
-from typing import List, Optional
+from typing import List, Optional, Dict, Any
+from enum import Enum
 
+class ArtifactType(str, Enum):
+    model = "model"
+    dataset = "dataset"
+    code = "code"
 
 class ArtifactBase(BaseModel):
     name: str
-    type: str
-    description: str | None = None
+    type: ArtifactType
+    description: Optional[str] = None
 
 class ArtifactCreate(ArtifactBase):
     pass
 
-class Artifact(ArtifactBase):
+class Artifact(BaseModel):
     id: int
-    # replaces orm_mode=True
+    name: str
+    type: ArtifactType
+    description: Optional[str] = None
     model_config = ConfigDict(from_attributes=True)
 
 class ArtifactMetadataOut(BaseModel):
     name: str
     id: str
-    type: str
+    type: ArtifactType
 
 class ArtifactQueryIn(BaseModel):
     name: str
-    types: Optional[List[str]] = None
+    types: Optional[List[ArtifactType]] = None
 
 class ArtifactDataIn(BaseModel):
     url: HttpUrl
 
 class ArtifactOut(BaseModel):
     metadata: ArtifactMetadataOut
-    data: dict[str, HttpUrl]
+    data: Dict[str, Any]   # <-- IMPORTANT

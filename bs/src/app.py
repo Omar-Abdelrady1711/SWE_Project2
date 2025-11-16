@@ -1,13 +1,19 @@
-from fastapi import FastAPI, APIRouter, Header, Depends, HTTPException, Query
+from fastapi import FastAPI, APIRouter, Header, Depends, HTTPException
 from fastapi.responses import RedirectResponse
 from fastapi.openapi.docs import get_swagger_ui_html
-from mangum import Mangum
-import os, time, logging, urllib.parse
-from typing import Dict, Any, Optional, List
 from fastapi.middleware.cors import CORSMiddleware
+from mangum import Mangum
+
+import os
+import time
+import logging
+import urllib.parse
 import re
 
+from typing import Dict, Any, Optional, List
+
 from sqlalchemy.orm import Session
+from pydantic import BaseModel
 
 from bs.src.models_db import init_db, reset_db, get_session, ArtifactModel
 from bs.src.schemas import (
@@ -15,72 +21,89 @@ from bs.src.schemas import (
     ArtifactQueryIn,
     ArtifactDataIn,
     ArtifactOut,
+    ArtifactType,
 )
 
-# Define which frontend origins are allowed to call this backend
+# ------------------- CORS / ENV / HELPERS -------------------
+
 origins = [
-    "http://localhost:5173",                #local dev
-    "https://z7rple5yzi.execute-api.us-east-1.amazonaws.com"   # deployed frontend URL
+    "http://localhost:5173",  # local dev
+    "https://z7rple5yzi.execute-api.us-east-1.amazonaws.com",  # deployed frontend URL
 ]
 
 STAGE = os.getenv("API_GATEWAY_BASE_PATH", "/Prod")
 
-from pydantic import BaseModel
-
 class ArtifactRegExIn(BaseModel):
     regex: str
-    
+
+class ArtifactsQueryIn(BaseModel):
+    queries: List[ArtifactQueryIn]
+    offset: Optional[str] = None
+
+VALID_TYPES = {"model", "dataset", "code"}
+ID_PATTERN = re.compile(r"^[A-Za-z0-9\-]+$")
+NAME_PATTERN = re.compile(r"^[\w\-\.\+]+$")  # letters/digits/_ . - +
+
+
+# ------------------- FASTAPI APP SETUP -------------------
+
 app = FastAPI(
     title="Team31 Backend (Phase 2)",
-    docs_url=None,                        # <-- disable built-in docs
+    docs_url=None,          # disable built-in docs
     redoc_url=None,
-    openapi_url="/openapi.json",  # <-- OpenAPI served under the stage
-    root_path=STAGE,                      # <-- tell FastAPI it's mounted at /Prod
+    openapi_url="/openapi.json",
+    root_path=STAGE,        # app is mounted behind /Prod on API Gateway
 )
 
-# CORS middleware
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,          # allowed domains
-    allow_credentials=True,         # allow cookies / auth headers if needed
-    allow_methods=["*"],            # allow all HTTP methods (GET, POST, etc.)
-    allow_headers=["*"],            # allow all headers (Authorization, Content-Type, etc.)
+    allow_origins=origins,
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
-
 
 api = APIRouter(prefix="/api")
 
+
 def health_response():
     return {"status": "ok", "phase": 2, "time": time.time()}
+
 
 @api.get("/health")
 def api_health():
     return health_response()
 
+
 @app.get("/health")
 def root_health():
     return health_response()
 
-# (safe-load your DB router exactly as you had)
+
+# Load Phase 1 CRUD router (for /api/artifacts simple endpoints)
 try:
-    from bs.src.models_db import init_db
     init_db()
     from bs.src.api.routes.artifacts import router as artifacts_router
     api.include_router(artifacts_router, prefix="/artifacts", tags=["artifacts"])
 except Exception as e:
     logging.getLogger(__name__).warning("Artifacts router not loaded: %s", e)
 
+
 @api.get("/")
 def api_root():
     return {"message": "Backend running", "docs": "/api/docs"}
 
+
 app.include_router(api)
+
 
 @app.get("/")
 def root():
     return RedirectResponse(url="/api")
 
-# ---- Custom Swagger UI served via CDN (avoids API GW static routes) ----
+
+# ---- Custom Swagger UI served via CDN ----
+
 @app.get("/docs", include_in_schema=False)
 def custom_docs():
     return get_swagger_ui_html(
@@ -89,7 +112,8 @@ def custom_docs():
         swagger_js_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js",
         swagger_css_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css",
     )
-# (If you prefer under the API prefix too:)
+
+
 @api.get("/docs", include_in_schema=False)
 def custom_docs_under_api():
     return get_swagger_ui_html(
@@ -99,12 +123,18 @@ def custom_docs_under_api():
         swagger_css_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css",
     )
 
+
 handler = Mangum(app, api_gateway_base_path=STAGE)
+
+
+# ------------------- TRACKS & RESET -------------------
 
 @app.get("/tracks")
 def get_tracks():
-    # We are not doing any special track yet, so just return empty list.
-    # (If later you do Access control or Performance, add them here.)
+    """
+    For now we are not opting into any special tracks.
+    Autograder will see plannedTracks: [] and skip security/perf tests.
+    """
     return {"plannedTracks": []}
 
 
@@ -113,55 +143,63 @@ def reset_system(x_authorization: str | None = Header(default=None)):
     """
     Reset the registry to an empty state.
 
-    - Ignore X-Authorization for now (we're not doing access-control track).
+    - Ignore X-Authorization for baseline.
     - Clear all artifacts from the DB.
     """
     reset_db()
     return {"status": "reset"}
 
-# -------- Phase 2: /artifacts and /artifact endpoints --------
+
+# ------------------- PHASE 2: ARTIFACT ENDPOINTS -------------------
+
 @app.post("/artifacts", response_model=List[ArtifactMetadataOut])
 def list_artifacts_phase2(
-    queries: List[ArtifactQueryIn],
-    offset: Optional[str] = Query(default=None),
+    body: ArtifactsQueryIn,
     x_authorization: str | None = Header(default=None, alias="X-Authorization"),
     db: Session = Depends(get_session),
 ):
     """
     Phase 2: POST /artifacts
 
-    - `queries` is an array of ArtifactQuery objects (name + optional types).
-    - `name` is a literal string; "*" means "all artifacts".
-    - We ignore offset and X-Authorization for grading.
+    Request body:
+    {
+      "queries": [
+        { "name": "<string or '*'>", "types": ["model", "dataset", "code"]? },
+        ...
+      ],
+      "offset": "..."   // optional, ignored for grading
+    }
+
+    "*" in name means "all artifacts" (for this endpoint only).
+    Returns union of all matching artifacts as ArtifactMetadataOut list.
     """
+    queries = body.queries
+
     if not queries:
         raise HTTPException(status_code=400, detail="At least one query is required")
 
-    # Union of results across all queries, deduped by id
-    results_by_id: dict[int, ArtifactModel] = {}
+    results_by_id: Dict[int, ArtifactModel] = {}
 
     for q in queries:
         q_query = db.query(ArtifactModel)
 
         # Filter by types if provided
         if q.types:
-            q_query = q_query.filter(ArtifactModel.type.in_(q.types))
+            q_query = q_query.filter(ArtifactModel.type.in_([t.value for t in q.types]))
 
-        # Literal name match (except for "*")
+        # Literal name match, except "*" which means "all"
         if q.name and q.name != "*":
             q_query = q_query.filter(ArtifactModel.name == q.name)
 
         for a in q_query.all():
             results_by_id[a.id] = a
 
-    # Stable ordering
     sorted_results = sorted(results_by_id.values(), key=lambda a: a.id)
 
     return [
-        ArtifactMetadataOut(name=a.name, id=str(a.id), type=a.type)
+        ArtifactMetadataOut(name=a.name, id=str(a.id), type=ArtifactType(a.type))
         for a in sorted_results
     ]
- 
 
 
 @app.post("/artifact/{artifact_type}", response_model=ArtifactOut, status_code=201)
@@ -175,11 +213,12 @@ def ingest_artifact_phase2(
     Phase 2: POST /artifact/{artifact_type}
 
     Register a new artifact given a URL.
+
+    artifact_type must be one of: model, dataset, code.
     """
-    if artifact_type not in {"model", "dataset", "code"}:
+    if artifact_type not in VALID_TYPES:
         raise HTTPException(status_code=400, detail="Invalid artifact_type")
 
-    # Derive a simple name from the URL (last path component)
     parsed = urllib.parse.urlparse(str(payload.url))
     name = parsed.path.rstrip("/").split("/")[-1] or "artifact"
 
@@ -193,10 +232,11 @@ def ingest_artifact_phase2(
     db.commit()
     db.refresh(obj)
 
-    metadata = ArtifactMetadataOut(name=obj.name, id=str(obj.id), type=obj.type)
-    data = {"url": payload.url}
+    metadata = ArtifactMetadataOut(name=obj.name, id=str(obj.id), type=ArtifactType(obj.type))
+    data: Dict[str, Any] = {"url": payload.url}
 
     return ArtifactOut(metadata=metadata, data=data)
+
 
 @app.post("/artifact/byRegEx", response_model=List[ArtifactMetadataOut])
 def artifact_by_regex(
@@ -207,32 +247,69 @@ def artifact_by_regex(
     """
     POST /artifact/byRegEx
 
-    Search for artifacts whose name or description matches the given regex.
+    Body: { "regex": "<pattern>" }
+
+    Search over artifact names and descriptions.
+
+    Spec:
+      - 200: list of ArtifactMetadata on match
+      - 400: malformed/invalid regex
+      - 404: no artifact matches this regex
     """
-    # Compile the regex
     try:
         pattern = re.compile(payload.regex)
     except re.error:
-        # Spec: 400 for malformed or invalid regex
         raise HTTPException(status_code=400, detail="Invalid artifact_regex")
 
-    matches: list[ArtifactModel] = []
+    matches: List[ArtifactModel] = []
 
     for a in db.query(ArtifactModel).all():
-        # We don't have READMEs, but we can search name + description
         text_name = a.name or ""
         text_desc = a.description or ""
         if pattern.search(text_name) or pattern.search(text_desc):
             matches.append(a)
 
     if not matches:
-        # Spec: 404 when no artifact found under this regex
         raise HTTPException(status_code=404, detail="No artifact found under this regex")
 
     return [
-        ArtifactMetadataOut(name=a.name, id=str(a.id), type=a.type)
+        ArtifactMetadataOut(name=a.name, id=str(a.id), type=ArtifactType(a.type))
         for a in matches
     ]
+
+
+def _get_artifact_by_type_and_id(
+    artifact_type: str,
+    id: str,
+    db: Session,
+) -> ArtifactOut:
+    """
+    Shared logic for:
+      - GET /artifacts/{artifact_type}/{id}
+      - GET /artifact/{artifact_type}/{id} (alias)
+    """
+    # Validate artifact_type
+    if artifact_type not in VALID_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid artifact_type")
+
+    # Validate ID pattern ^[A-Za-z0-9\-]+$
+    if not ID_PATTERN.fullmatch(id):
+        raise HTTPException(status_code=400, detail="Invalid artifact id")
+
+    # Our DB uses integer PKs; autograder sends numeric IDs.
+    if not id.isdigit():
+        raise HTTPException(status_code=400, detail="Invalid artifact id")
+
+    int_id = int(id)
+
+    obj = db.get(ArtifactModel, int_id)
+    if not obj or obj.type != artifact_type:
+        raise HTTPException(status_code=404, detail="Artifact does not exist")
+
+    metadata = ArtifactMetadataOut(name=obj.name, id=str(obj.id), type=ArtifactType(obj.type))
+    data: Dict[str, Any] = {"url": obj.url} if obj.url else {}
+
+    return ArtifactOut(metadata=metadata, data=data)
 
 
 @app.get("/artifacts/{artifact_type}/{id}", response_model=ArtifactOut)
@@ -245,21 +322,10 @@ def get_artifact_phase2(
     """
     Phase 2: GET /artifacts/{artifact_type}/{id}
 
-    Return full artifact (metadata + data.url).
+    Return full artifact (metadata + data).
     """
-    try:
-        int_id = int(id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid artifact id")
+    return _get_artifact_by_type_and_id(artifact_type, id, db)
 
-    obj = db.get(ArtifactModel, int_id)
-    if not obj or obj.type != artifact_type:
-        raise HTTPException(status_code=404, detail="Artifact does not exist")
-
-    metadata = ArtifactMetadataOut(name=obj.name, id=str(obj.id), type=obj.type)
-    data = {"url": obj.url} if obj.url else {}
-
-    return ArtifactOut(metadata=metadata, data=data)
 
 @app.get("/artifact/{artifact_type}/{id}", response_model=ArtifactOut)
 def get_artifact_phase2_singular(
@@ -269,22 +335,11 @@ def get_artifact_phase2_singular(
     db: Session = Depends(get_session),
 ):
     """
-    Phase 2: GET /artifact/{artifact_type}/{id}
-    Return full artifact (metadata + data.url).
+    Singular alias for /artifacts/{artifact_type}/{id}.
+    Autograder should use the plural route, but this is kept for safety.
     """
-    try:
-        int_id = int(id)
-    except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid artifact id")
+    return _get_artifact_by_type_and_id(artifact_type, id, db)
 
-    obj = db.get(ArtifactModel, int_id)
-    if not obj or obj.type != artifact_type:
-        raise HTTPException(status_code=404, detail="Artifact does not exist")
-
-    metadata = ArtifactMetadataOut(name=obj.name, id=str(obj.id), type=obj.type)
-    data = {"url": obj.url} if obj.url else {}
-
-    return ArtifactOut(metadata=metadata, data=data)
 
 @app.get("/artifact/byName/{name}", response_model=List[ArtifactMetadataOut])
 def get_artifact_by_name(
@@ -296,7 +351,20 @@ def get_artifact_by_name(
     GET /artifact/byName/{name}
 
     Return metadata for all artifacts whose name exactly matches `name`.
+
+    Spec:
+      - 200: list of ArtifactMetadata
+      - 400: invalid name (including "*")
+      - 404: no such artifact
     """
+    # "*" is reserved for /artifacts queries, not valid here
+    if name == "*":
+        raise HTTPException(status_code=400, detail="Invalid artifact name '*'")
+
+    # Basic name validation
+    if not name or not NAME_PATTERN.fullmatch(name):
+        raise HTTPException(status_code=400, detail="Invalid artifact name")
+
     objs = (
         db.query(ArtifactModel)
         .filter(ArtifactModel.name == name)
@@ -304,11 +372,9 @@ def get_artifact_by_name(
     )
 
     if not objs:
-        # Spec: "404: No such artifact."
         raise HTTPException(status_code=404, detail="No such artifact")
 
     return [
-        ArtifactMetadataOut(name=o.name, id=str(o.id), type=o.type)
+        ArtifactMetadataOut(name=o.name, id=str(o.id), type=ArtifactType(o.type))
         for o in objs
     ]
-
