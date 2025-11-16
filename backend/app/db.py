@@ -1,6 +1,8 @@
 from typing import Generator
 from sqlmodel import create_engine, Session
 from sqlmodel import SQLModel
+# ensure models are imported so SQLModel metadata is populated before create_all
+from . import models  # noqa: F401
 import os
 
 DATABASE_URL = os.environ.get("BACKEND_DATABASE_URL", "sqlite:///backend.db")

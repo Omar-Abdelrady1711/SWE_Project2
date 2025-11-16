@@ -37,3 +37,21 @@ class Schedule(SQLModel, table=True):
 class Config(SQLModel, table=True):
     key: str = Field(primary_key=True)
     value: Optional[str] = None
+
+
+# Auth models
+class User(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    username: str = Field(index=True, nullable=False)
+    password_hash: str
+    roles: Optional[str] = Field(default="user")  # comma-separated roles
+    is_active: bool = Field(default=True)
+
+
+class RefreshToken(SQLModel, table=True):
+    id: Optional[int] = Field(default=None, primary_key=True)
+    user_id: int
+    token_hash: str
+    revoked: bool = Field(default=False)
+    issued_at: datetime = Field(default_factory=datetime.utcnow)
+    expires_at: Optional[datetime] = None
