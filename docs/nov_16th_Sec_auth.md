@@ -26,7 +26,6 @@ On Nov 16 I added a minimal authentication example to the `backend/` scaffold to
 What I changed
 - Registered the auth router in `backend/app/main.py`.
 - Updated `backend/app/models.py` to include `User` and `RefreshToken`.
-- Added `backend/app/mqtt_bridge.py` earlier (unrelated to auth) and left it as a lightweight example.
 - `backend/app/db.py` was modified to import models so `SQLModel.metadata.create_all()` sees the tables.
 
 How the auth works (design notes)
