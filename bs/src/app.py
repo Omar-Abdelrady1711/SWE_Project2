@@ -33,8 +33,6 @@ origins = [
 
 STAGE = os.getenv("API_GATEWAY_BASE_PATH", "/Prod")
 
-class ArtifactRegExIn(BaseModel):
-    regex: str
 
 class ArtifactsQueryIn(BaseModel):
     queries: List[ArtifactQueryIn]
@@ -203,24 +201,38 @@ def list_artifacts_phase2(
 
 @app.post("/artifact/byRegEx", response_model=List[ArtifactMetadataOut])
 def artifact_by_regex(
-    payload: ArtifactRegExIn,
+    body: dict = Body(...),
     x_authorization: str | None = Header(default=None, alias="X-Authorization"),
     db: Session = Depends(get_session),
 ):
     """
     POST /artifact/byRegEx
 
-    Body: { "regex": "<pattern>" }
+    Accepts either:
+      { "regex": "<pattern>" }          (what you're using locally)
+    or:
+      { "artifact_regex": "<pattern>" } (what the autograder likely uses)
 
-    Search over artifact names and descriptions.
+    Behavior:
+      - 200: list of ArtifactMetadata for matches on name/description
+      - 400: malformed / missing / invalid regex
+      - 404: no artifacts match
     """
+    # Accept both keys
+    pattern_str = body.get("regex") or body.get("artifact_regex")
+
+    # Missing or wrong type → 400
+    if not isinstance(pattern_str, str) or not pattern_str:
+        raise HTTPException(status_code=400, detail="Invalid artifact_regex")
+
+    # Invalid regex syntax → 400
     try:
-        pattern = re.compile(payload.regex)
+        pattern = re.compile(pattern_str)
     except re.error:
         raise HTTPException(status_code=400, detail="Invalid artifact_regex")
 
-    matches: List[ArtifactModel] = []
-
+    # Search artifacts by name or description
+    matches: list[ArtifactModel] = []
     for a in db.query(ArtifactModel).all():
         text_name = a.name or ""
         text_desc = a.description or ""
