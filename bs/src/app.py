@@ -33,6 +33,16 @@ origins = [
 
 STAGE = os.getenv("API_GATEWAY_BASE_PATH", "/Prod")
 
+class ArtifactRegExIn(BaseModel):
+    # accept both "regex" and optionally "artifact_regex"
+    regex: Optional[str] = None
+    artifact_regex: Optional[str] = None
+
+    @property
+    def effective_regex(self) -> str:
+        # prefer "regex", fall back to "artifact_regex"
+        return self.regex or self.artifact_regex or ""
+
 
 class ArtifactsQueryIn(BaseModel):
     queries: List[ArtifactQueryIn]
@@ -200,28 +210,26 @@ def list_artifacts_phase2(
 
 @app.post("/artifact/byRegEx", response_model=List[ArtifactMetadataOut])
 def artifact_by_regex(
-    body: dict = Body(...),
+    payload: ArtifactRegExIn,
     x_authorization: str | None = Header(default=None, alias="X-Authorization"),
     db: Session = Depends(get_session),
 ):
     """
     POST /artifact/byRegEx
 
-    Accepts either:
-      { "regex": "<pattern>" }          (your local tests)
-    or:
-      { "artifact_regex": "<pattern>" } (what the autograder may send)
+    Body: { "regex": "<pattern>" }
 
-    Behavior:
-      - 200: list of ArtifactMetadata for matches on name/description
-      - 400: malformed / missing / invalid regex
-      - 404: no artifacts match
+    Search over artifact names and descriptions.
+
+    Spec:
+      - 200: list of ArtifactMetadata on match
+      - 400: malformed/invalid regex or missing regex
+      - 404: no artifact matches this regex
     """
-    # Accept both keys
-    pattern_str = body.get("regex") or body.get("artifact_regex")
+    pattern_str = payload.effective_regex
 
-    # Missing or wrong type → 400
-    if not isinstance(pattern_str, str) or not pattern_str:
+    # Missing or empty regex → 400
+    if not pattern_str:
         raise HTTPException(status_code=400, detail="Invalid artifact_regex")
 
     # Invalid regex syntax → 400
@@ -230,8 +238,8 @@ def artifact_by_regex(
     except re.error:
         raise HTTPException(status_code=400, detail="Invalid artifact_regex")
 
-    # Search artifacts by name or description
     matches: List[ArtifactModel] = []
+
     for a in db.query(ArtifactModel).all():
         text_name = a.name or ""
         text_desc = a.description or ""
@@ -245,6 +253,7 @@ def artifact_by_regex(
         ArtifactMetadataOut(name=a.name, id=str(a.id), type=ArtifactType(a.type))
         for a in matches
     ]
+
 
 @app.get("/artifact/byName/{name}", response_model=List[ArtifactMetadataOut])
 def get_artifact_by_name(
@@ -263,11 +272,13 @@ def get_artifact_by_name(
       - 404: no such artifact
     """
     # "*" is reserved for /artifacts queries, not valid here
-    if not name or name == "*":
+    if name == "*":
+        raise HTTPException(status_code=400, detail="Invalid artifact name '*'")
+
+    # Basic name validation
+    if not name or not NAME_PATTERN.fullmatch(name):
         raise HTTPException(status_code=400, detail="Invalid artifact name")
 
-    # NOTE: no extra regex validation here – the spec does not restrict
-    # ArtifactName beyond "typical keyboard characters".
     objs = (
         db.query(ArtifactModel)
         .filter(ArtifactModel.name == name)
@@ -333,21 +344,24 @@ def _get_artifact_by_type_and_id(
     """
     Shared logic for:
       - GET /artifacts/{artifact_type}/{id}
-      - GET /artifact/{artifact_type}/{id}
+      - GET /artifact/{artifact_type}/{id} (alias)
     """
-    # Validate artifact_type against the three allowed types
+    # Validate artifact_type
     if artifact_type not in VALID_TYPES:
         raise HTTPException(status_code=400, detail="Invalid artifact_type")
 
-    # ID must be a non-empty decimal integer (what the autograder uses)
-    if not id or not id.isdigit():
+    # Validate ID pattern ^[A-Za-z0-9\-]+$
+    if not ID_PATTERN.fullmatch(id):
+        raise HTTPException(status_code=400, detail="Invalid artifact id")
+
+    # Our DB uses integer PKs; autograder sends numeric IDs.
+    if not id.isdigit():
         raise HTTPException(status_code=400, detail="Invalid artifact id")
 
     int_id = int(id)
 
     obj = db.get(ArtifactModel, int_id)
     if not obj or obj.type != artifact_type:
-        # Valid ID format, but no such artifact or wrong type
         raise HTTPException(status_code=404, detail="Artifact does not exist")
 
     metadata = ArtifactMetadataOut(
@@ -355,13 +369,9 @@ def _get_artifact_by_type_and_id(
         id=str(obj.id),
         type=ArtifactType(obj.type),
     )
-
-    data: Dict[str, Any] = {}
-    if obj.url:
-        data["url"] = obj.url
+    data: Dict[str, Any] = {"url": obj.url} if obj.url else {}
 
     return ArtifactOut(metadata=metadata, data=data)
-
 
 
 @app.get("/artifacts/{artifact_type}/{id}", response_model=ArtifactOut)
