@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, Header, Depends, HTTPException, Body
+from fastapi import FastAPI, APIRouter, Header, Depends, HTTPException
 from fastapi.responses import RedirectResponse
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.middleware.cors import CORSMiddleware
@@ -34,24 +34,15 @@ origins = [
 STAGE = os.getenv("API_GATEWAY_BASE_PATH", "/Prod")
 
 class ArtifactRegExIn(BaseModel):
-    # accept both "regex" and optionally "artifact_regex"
-    regex: Optional[str] = None
-    artifact_regex: Optional[str] = None
-
-    @property
-    def effective_regex(self) -> str:
-        # prefer "regex", fall back to "artifact_regex"
-        return self.regex or self.artifact_regex or ""
-
+    regex: str
 
 class ArtifactsQueryIn(BaseModel):
     queries: List[ArtifactQueryIn]
     offset: Optional[str] = None
 
-
 VALID_TYPES = {"model", "dataset", "code"}
-ID_PATTERN = re.compile(r"^[A-Za-z0-9\-]+$")          # IDs: letters, digits, hyphen
-NAME_PATTERN = re.compile(r"^[\w\-\.\+]+$")           # names: letters/digits/_ . - +
+ID_PATTERN = re.compile(r"^[A-Za-z0-9\-]+$")
+NAME_PATTERN = re.compile(r"^[\w\-\.\+]+$")  # letters/digits/_ . - +
 
 
 # ------------------- FASTAPI APP SETUP -------------------
@@ -191,6 +182,7 @@ def list_artifacts_phase2(
 
         # Filter by types if provided
         if q.types:
+            # q.types is List[ArtifactType] now
             q_query = q_query.filter(ArtifactModel.type.in_([t.value for t in q.types]))
 
         # Literal name match, except "*" which means "all"
@@ -208,6 +200,42 @@ def list_artifacts_phase2(
     ]
 
 
+@app.post("/artifact/{artifact_type}", response_model=ArtifactOut, status_code=201)
+def ingest_artifact_phase2(
+    artifact_type: str,
+    payload: ArtifactDataIn,
+    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
+    db: Session = Depends(get_session),
+):
+    """
+    Phase 2: POST /artifact/{artifact_type}
+
+    Register a new artifact given a URL.
+
+    artifact_type must be one of: model, dataset, code.
+    """
+    if artifact_type not in VALID_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid artifact_type")
+
+    parsed = urllib.parse.urlparse(str(payload.url))
+    name = parsed.path.rstrip("/").split("/")[-1] or "artifact"
+
+    obj = ArtifactModel(
+        name=name,
+        type=artifact_type,
+        description=None,
+        url=str(payload.url),
+    )
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+
+    metadata = ArtifactMetadataOut(name=obj.name, id=str(obj.id), type=ArtifactType(obj.type))
+    data: Dict[str, Any] = {"url": payload.url}
+
+    return ArtifactOut(metadata=metadata, data=data)
+
+
 @app.post("/artifact/byRegEx", response_model=List[ArtifactMetadataOut])
 def artifact_by_regex(
     payload: ArtifactRegExIn,
@@ -223,18 +251,11 @@ def artifact_by_regex(
 
     Spec:
       - 200: list of ArtifactMetadata on match
-      - 400: malformed/invalid regex or missing regex
+      - 400: malformed/invalid regex
       - 404: no artifact matches this regex
     """
-    pattern_str = payload.effective_regex
-
-    # Missing or empty regex → 400
-    if not pattern_str:
-        raise HTTPException(status_code=400, detail="Invalid artifact_regex")
-
-    # Invalid regex syntax → 400
     try:
-        pattern = re.compile(pattern_str)
+        pattern = re.compile(payload.regex)
     except re.error:
         raise HTTPException(status_code=400, detail="Invalid artifact_regex")
 
@@ -253,6 +274,69 @@ def artifact_by_regex(
         ArtifactMetadataOut(name=a.name, id=str(a.id), type=ArtifactType(a.type))
         for a in matches
     ]
+
+
+def _get_artifact_by_type_and_id(
+    artifact_type: str,
+    id: str,
+    db: Session,
+) -> ArtifactOut:
+    """
+    Shared logic for:
+      - GET /artifacts/{artifact_type}/{id}
+      - GET /artifact/{artifact_type}/{id} (alias)
+    """
+    # Validate artifact_type
+    if artifact_type not in VALID_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid artifact_type")
+
+    # Validate ID pattern ^[A-Za-z0-9\-]+$
+    if not ID_PATTERN.fullmatch(id):
+        raise HTTPException(status_code=400, detail="Invalid artifact id")
+
+    # Our DB uses integer PKs; autograder sends numeric IDs.
+    if not id.isdigit():
+        raise HTTPException(status_code=400, detail="Invalid artifact id")
+
+    int_id = int(id)
+
+    obj = db.get(ArtifactModel, int_id)
+    if not obj or obj.type != artifact_type:
+        raise HTTPException(status_code=404, detail="Artifact does not exist")
+
+    metadata = ArtifactMetadataOut(name=obj.name, id=str(obj.id), type=ArtifactType(obj.type))
+    data: Dict[str, Any] = {"url": obj.url} if obj.url else {}
+
+    return ArtifactOut(metadata=metadata, data=data)
+
+
+@app.get("/artifacts/{artifact_type}/{id}", response_model=ArtifactOut)
+def get_artifact_phase2(
+    artifact_type: str,
+    id: str,
+    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
+    db: Session = Depends(get_session),
+):
+    """
+    Phase 2: GET /artifacts/{artifact_type}/{id}
+
+    Return full artifact (metadata + data).
+    """
+    return _get_artifact_by_type_and_id(artifact_type, id, db)
+
+
+@app.get("/artifact/{artifact_type}/{id}", response_model=ArtifactOut)
+def get_artifact_phase2_singular(
+    artifact_type: str,
+    id: str,
+    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
+    db: Session = Depends(get_session),
+):
+    """
+    Singular alias for /artifacts/{artifact_type}/{id}.
+    Autograder should use the plural route, but this is kept for safety.
+    """
+    return _get_artifact_by_type_and_id(artifact_type, id, db)
 
 
 @app.get("/artifact/byName/{name}", response_model=List[ArtifactMetadataOut])
@@ -292,114 +376,3 @@ def get_artifact_by_name(
         ArtifactMetadataOut(name=o.name, id=str(o.id), type=ArtifactType(o.type))
         for o in objs
     ]
-
-
-@app.post("/artifact/{artifact_type}", response_model=ArtifactOut, status_code=201)
-def ingest_artifact_phase2(
-    artifact_type: str,
-    payload: ArtifactDataIn,
-    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
-    db: Session = Depends(get_session),
-):
-    """
-    Phase 2: POST /artifact/{artifact_type}
-
-    Register a new artifact given a URL.
-
-    artifact_type must be one of: model, dataset, code.
-    """
-    if artifact_type not in VALID_TYPES:
-        raise HTTPException(status_code=400, detail="Invalid artifact_type")
-
-    parsed = urllib.parse.urlparse(str(payload.url))
-    name = parsed.path.rstrip("/").split("/")[-1] or "artifact"
-
-    obj = ArtifactModel(
-        name=name,
-        type=artifact_type,
-        description=None,
-        url=str(payload.url),
-    )
-    db.add(obj)
-    db.commit()
-    db.refresh(obj)
-
-    metadata = ArtifactMetadataOut(
-        name=obj.name,
-        id=str(obj.id),
-        type=ArtifactType(obj.type),
-    )
-    data: Dict[str, Any] = {"url": payload.url}
-
-    return ArtifactOut(metadata=metadata, data=data)
-
-
-# ---------- HELPER FOR ID-BASED LOOKUPS (used by both GET endpoints) ----------
-
-def _get_artifact_by_type_and_id(
-    artifact_type: str,
-    id: str,
-    db: Session,
-) -> ArtifactOut:
-    """
-    Shared logic for:
-      - GET /artifacts/{artifact_type}/{id}
-      - GET /artifact/{artifact_type}/{id} (alias)
-    """
-    # Validate artifact_type
-    if artifact_type not in VALID_TYPES:
-        raise HTTPException(status_code=400, detail="Invalid artifact_type")
-
-    # Validate ID pattern ^[A-Za-z0-9\-]+$
-    if not ID_PATTERN.fullmatch(id):
-        raise HTTPException(status_code=400, detail="Invalid artifact id")
-
-    # Our DB uses integer PKs; autograder sends numeric IDs.
-    if not id.isdigit():
-        raise HTTPException(status_code=400, detail="Invalid artifact id")
-
-    int_id = int(id)
-
-    obj = db.get(ArtifactModel, int_id)
-    if not obj or obj.type != artifact_type:
-        raise HTTPException(status_code=404, detail="Artifact does not exist")
-
-    metadata = ArtifactMetadataOut(
-        name=obj.name,
-        id=str(obj.id),
-        type=ArtifactType(obj.type),
-    )
-    data: Dict[str, Any] = {"url": obj.url} if obj.url else {}
-
-    return ArtifactOut(metadata=metadata, data=data)
-
-
-@app.get("/artifacts/{artifact_type}/{id}", response_model=ArtifactOut)
-def get_artifact_phase2(
-    artifact_type: str,
-    id: str,
-    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
-    db: Session = Depends(get_session),
-):
-    """
-    Phase 2: GET /artifacts/{artifact_type}/{id}
-
-    Return full artifact (metadata + data).
-    """
-    return _get_artifact_by_type_and_id(artifact_type, id, db)
-
-@app.get("/artifact/{artifact_type}/{id}", response_model=ArtifactOut)
-def get_artifact_phase2_singular(
-    artifact_type: str,
-    id: str,
-    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
-    db: Session = Depends(get_session),
-):
-    """
-    Singular alias for /artifacts/{artifact_type}/{id}.
-    Autograder should use the plural route, but this is kept for safety.
-    """
-    return _get_artifact_by_type_and_id(artifact_type, id, db)
-
-
-
