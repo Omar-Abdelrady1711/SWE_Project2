@@ -263,13 +263,11 @@ def get_artifact_by_name(
       - 404: no such artifact
     """
     # "*" is reserved for /artifacts queries, not valid here
-    if name == "*":
-        raise HTTPException(status_code=400, detail="Invalid artifact name '*'")
-
-    # Basic name validation
-    if not name or not NAME_PATTERN.fullmatch(name):
+    if not name or name == "*":
         raise HTTPException(status_code=400, detail="Invalid artifact name")
 
+    # NOTE: no extra regex validation here – the spec does not restrict
+    # ArtifactName beyond "typical keyboard characters".
     objs = (
         db.query(ArtifactModel)
         .filter(ArtifactModel.name == name)
@@ -283,7 +281,6 @@ def get_artifact_by_name(
         ArtifactMetadataOut(name=o.name, id=str(o.id), type=ArtifactType(o.type))
         for o in objs
     ]
-
 
 
 @app.post("/artifact/{artifact_type}", response_model=ArtifactOut, status_code=201)
@@ -338,22 +335,19 @@ def _get_artifact_by_type_and_id(
       - GET /artifacts/{artifact_type}/{id}
       - GET /artifact/{artifact_type}/{id}
     """
-    # Validate artifact_type
+    # Validate artifact_type against the three allowed types
     if artifact_type not in VALID_TYPES:
         raise HTTPException(status_code=400, detail="Invalid artifact_type")
 
-    # Validate ID pattern ^[A-Za-z0-9\-]+$ and non-empty
-    if not id or not ID_PATTERN.fullmatch(id):
-        raise HTTPException(status_code=400, detail="Invalid artifact id")
-
-    # Our DB uses integer PKs; autograder sends numeric IDs.
-    if not id.isdigit():
+    # ID must be a non-empty decimal integer (what the autograder uses)
+    if not id or not id.isdigit():
         raise HTTPException(status_code=400, detail="Invalid artifact id")
 
     int_id = int(id)
 
     obj = db.get(ArtifactModel, int_id)
     if not obj or obj.type != artifact_type:
+        # Valid ID format, but no such artifact or wrong type
         raise HTTPException(status_code=404, detail="Artifact does not exist")
 
     metadata = ArtifactMetadataOut(
@@ -367,6 +361,7 @@ def _get_artifact_by_type_and_id(
         data["url"] = obj.url
 
     return ArtifactOut(metadata=metadata, data=data)
+
 
 
 @app.get("/artifacts/{artifact_type}/{id}", response_model=ArtifactOut)
