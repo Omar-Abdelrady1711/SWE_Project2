@@ -41,7 +41,7 @@ class ArtifactsQueryIn(BaseModel):
     offset: Optional[str] = None
 
 VALID_TYPES = {"model", "dataset", "code"}
-ID_PATTERN = re.compile(r"^[A-Za-z0-9\-]+$")
+ID_PATTERN = re.compile(r"^[a-zA-Z0-9\-]+$")
 NAME_PATTERN = re.compile(r"^[\w\-\.\+]+$")  # letters/digits/_ . - +
 
 
@@ -325,39 +325,38 @@ def get_artifact_by_name(
     GET /artifact/byName/{name}
 
     Spec:
-      - 200: list of ArtifactMetadata
+      - 200: list of ArtifactMetadata for this name
       - 400: invalid name (including "*")
       - 404: no such artifact
     """
+    import urllib.parse
 
-    # 🔹 Decode URL encoding (e.g., %20 -> space)
+    # Decode URL encoding just to be safe (FastAPI usually does this, but harmless)
     name = urllib.parse.unquote(name)
 
-    # 🔹 "*" is reserved and invalid here
+    # 1) Reject "*" (reserved for POST /artifacts)
     if name == "*":
         raise HTTPException(status_code=400, detail="Invalid artifact_name: '*' is reserved")
 
-    # 🔹 Reject empty / all-whitespace names
+    # 2) Reject empty / whitespace-only
     if not name or not name.strip():
         raise HTTPException(status_code=400, detail="Invalid artifact_name")
 
-    # 🔹 Reject control characters (non-printable weird stuff)
+    # 3) Reject control characters (non-printable)
     if any(ord(c) < 32 or c == "\x7f" for c in name):
         raise HTTPException(status_code=400, detail="Invalid artifact_name")
 
-    # 👉 Otherwise, accept any typical keyboard characters (spaces, slashes, etc.)
+    # 4) Query DB for EXACT name match, sort by id ASC
     objs = (
         db.query(ArtifactModel)
         .filter(ArtifactModel.name == name)
+        .order_by(ArtifactModel.id.asc())
         .all()
     )
 
     if not objs:
-        # Valid name, but no artifacts
+        # Valid name format, but no artifacts with this name
         raise HTTPException(status_code=404, detail="No such artifact")
-
-    # 🔹 Sort by id for deterministic ordering
-    objs.sort(key=lambda o: o.id)
 
     return [
         ArtifactMetadataOut(name=o.name, id=str(o.id), type=ArtifactType(o.type))
@@ -375,25 +374,33 @@ def _get_artifact_by_type_and_id(
     """
     Shared logic for:
       - GET /artifacts/{artifact_type}/{id}
-      - GET /artifact/{artifact_type}/{id}
+      - GET /artifact/{artifact_type}/{id} (alias)
+
+    Spec:
+      - 200: artifact found
+      - 400: invalid artifact_type OR artifact_id *format*
+      - 404: valid format, but artifact doesn't exist / type mismatch
     """
-    # Validate artifact_type
+    # 1) Validate type
     if artifact_type not in VALID_TYPES:
         raise HTTPException(status_code=400, detail="Invalid artifact_type")
 
-    # Validate ID pattern ^[A-Za-z0-9\-]+$
+    # 2) Validate ID format against regex
     if not ID_PATTERN.fullmatch(id):
-        raise HTTPException(status_code=400, detail="Invalid artifact id")
+        raise HTTPException(status_code=400, detail="Invalid artifact_id")
 
-    # Our DB uses integer PKs; autograder sends numeric IDs.
-    # If it's not numeric but matches the pattern, treat it as "not found" (404).
+    # 3) Try to convert to integer PK (our DB uses ints)
     try:
         int_id = int(id)
     except ValueError:
+        # Format is okay per pattern, but can't be an actual row in our DB.
+        # -> According to spec: treat as "artifact does not exist".
         raise HTTPException(status_code=404, detail="Artifact does not exist")
 
+    # 4) Look up artifact in DB
     obj = db.get(ArtifactModel, int_id)
     if not obj or obj.type != artifact_type:
+        # Either no row, or type mismatch
         raise HTTPException(status_code=404, detail="Artifact does not exist")
 
     metadata = ArtifactMetadataOut(
