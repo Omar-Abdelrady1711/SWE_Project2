@@ -313,6 +313,8 @@ def artifact_by_regex(
 
 
 # -------- GET /artifact/byName/{name} (must be ABOVE {artifact_type}/{id}) --------
+import urllib.parse
+
 @app.get("/artifact/byName/{name}", response_model=List[ArtifactMetadataOut])
 def get_artifact_by_name(
     name: str,
@@ -322,31 +324,28 @@ def get_artifact_by_name(
     """
     GET /artifact/byName/{name}
 
-    Return metadata for all artifacts whose name exactly matches `name`.
-
     Spec:
       - 200: list of ArtifactMetadata
       - 400: invalid name (including "*")
       - 404: no such artifact
     """
-    import urllib.parse
 
-    # Decode URL-encoded names (e.g. "foo%20bar" -> "foo bar")
+    # 🔹 Decode URL encoding (e.g., %20 -> space)
     name = urllib.parse.unquote(name)
 
-    # "*" is reserved for POST /artifacts, not valid here
+    # 🔹 "*" is reserved and invalid here
     if name == "*":
         raise HTTPException(status_code=400, detail="Invalid artifact_name: '*' is reserved")
 
-    # empty / whitespace-only -> invalid
+    # 🔹 Reject empty / all-whitespace names
     if not name or not name.strip():
         raise HTTPException(status_code=400, detail="Invalid artifact_name")
 
-    # reject control characters / null bytes
+    # 🔹 Reject control characters (non-printable weird stuff)
     if any(ord(c) < 32 or c == "\x7f" for c in name):
         raise HTTPException(status_code=400, detail="Invalid artifact_name")
 
-    # otherwise treat it as a valid name and query DB
+    # 👉 Otherwise, accept any typical keyboard characters (spaces, slashes, etc.)
     objs = (
         db.query(ArtifactModel)
         .filter(ArtifactModel.name == name)
@@ -354,16 +353,17 @@ def get_artifact_by_name(
     )
 
     if not objs:
-        # valid name format, but nothing in DB
+        # Valid name, but no artifacts
         raise HTTPException(status_code=404, detail="No such artifact")
 
-    # deterministic order
+    # 🔹 Sort by id for deterministic ordering
     objs.sort(key=lambda o: o.id)
 
     return [
         ArtifactMetadataOut(name=o.name, id=str(o.id), type=ArtifactType(o.type))
         for o in objs
     ]
+
 
 
 # -------- Shared helper for ID-based lookups --------
