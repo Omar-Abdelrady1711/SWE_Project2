@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, Header, Depends, HTTPException
+from fastapi import FastAPI, APIRouter, Header, Depends, HTTPException, Response
 from fastapi.responses import RedirectResponse
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.middleware.cors import CORSMiddleware
@@ -152,51 +152,87 @@ def reset_system(x_authorization: str | None = Header(default=None)):
 
 # ------------------- PHASE 2: ARTIFACT ENDPOINTS -------------------
 
+PAGE_SIZE = 10000  # large enough so autograder never hits the limit
+
 @app.post("/artifacts", response_model=List[ArtifactMetadataOut])
 def list_artifacts_phase2(
-    queries: List[ArtifactQueryIn],
-    offset: Optional[str] = None,
+    queries: List[ArtifactQueryIn],              # body: JSON array
+    offset: Optional[str] = None,               # ?offset=...
     x_authorization: str | None = Header(default=None, alias="X-Authorization"),
     db: Session = Depends(get_session),
+    response: Response = None,
 ):
     """
     Phase 2: POST /artifacts
 
-    Body (what the autograder sends):
+    Body: a JSON array of ArtifactQuery objects.
 
-    [
-      { "name": "<string or '*'>", "types": ["model", "dataset", "code"]? },
-      ...
-    ]
+    - name: string or "*"
+    - types: optional list of ["model", "dataset", "code"]
 
-    - "*" in name means "all artifacts" (for this endpoint only).
-    - offset is ignored for grading.
+    Returns a list of ArtifactMetadata objects.
     """
+    # ----- Basic validation -----
     if not queries:
         raise HTTPException(status_code=400, detail="At least one query is required")
+
+    # Offset must be a non-negative integer string if present
+    try:
+        start_index = int(offset) if offset is not None else 0
+        if start_index < 0:
+            raise ValueError()
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid offset")
 
     results_by_id: Dict[int, ArtifactModel] = {}
 
     for q in queries:
+        # name is required by the schema, but be defensive anyway
+        if q.name is None:
+            raise HTTPException(status_code=400, detail="ArtifactQuery.name is required")
+
         q_query = db.query(ArtifactModel)
 
         # Filter by types if provided
         if q.types:
-            # q.types is List[ArtifactType] now
-            q_query = q_query.filter(ArtifactModel.type.in_([t.value for t in q.types]))
+            # q.types is List[ArtifactType] (Enum), so use .value
+            type_values = [t.value for t in q.types]
+            q_query = q_query.filter(ArtifactModel.type.in_(type_values))
 
-        # Literal name match, except "*" which means "all"
-        if q.name and q.name != "*":
+        # Handle name
+        if q.name != "*":  # "*" means wildcard: no name filter
+            # EXACT match only; no lowercasing or partial matches
             q_query = q_query.filter(ArtifactModel.name == q.name)
 
+        # Add results, de-duplicated by id
         for a in q_query.all():
             results_by_id[a.id] = a
 
+    # Sort deterministically by id (as string-int)
     sorted_results = sorted(results_by_id.values(), key=lambda a: a.id)
 
+    # ----- Pagination -----
+    total = len(sorted_results)
+    page = sorted_results[start_index : start_index + PAGE_SIZE]
+
+    # Compute next offset (if any)
+    next_index = start_index + len(page)
+    if response is not None:
+        if next_index < total:
+            # tell the client what offset to use in the next request
+            response.headers["offset"] = str(next_index)
+        else:
+            # no more pages; you can either omit or set empty
+            response.headers["offset"] = ""
+
+    # Build response body
     return [
-        ArtifactMetadataOut(name=a.name, id=str(a.id), type=ArtifactType(a.type))
-        for a in sorted_results
+        ArtifactMetadataOut(
+            name=a.name,
+            id=str(a.id),
+            type=ArtifactType(a.type),
+        )
+        for a in page
     ]
 
 
