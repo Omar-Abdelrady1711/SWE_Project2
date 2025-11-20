@@ -276,6 +276,61 @@ def artifact_by_regex(
     ]
 
 
+# -------- GET /artifact/byName/{name} (must be ABOVE {artifact_type}/{id}) --------
+@app.get("/artifact/byName/{name}", response_model=List[ArtifactMetadataOut])
+def get_artifact_by_name(
+    name: str,
+    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
+    db: Session = Depends(get_session),
+):
+    """
+    GET /artifact/byName/{name}
+
+    Return metadata for all artifacts whose name exactly matches `name`.
+
+    Spec:
+      - 200: list of ArtifactMetadata
+      - 400: invalid name (including "*")
+      - 404: no such artifact
+    """
+    import urllib.parse
+
+    # Decode URL-encoded names (e.g. "foo%20bar" -> "foo bar")
+    name = urllib.parse.unquote(name)
+
+    # "*" is reserved for POST /artifacts, not valid here
+    if name == "*":
+        raise HTTPException(status_code=400, detail="Invalid artifact_name: '*' is reserved")
+
+    # empty / whitespace-only -> invalid
+    if not name or not name.strip():
+        raise HTTPException(status_code=400, detail="Invalid artifact_name")
+
+    # reject control characters / null bytes
+    if any(ord(c) < 32 or c == "\x7f" for c in name):
+        raise HTTPException(status_code=400, detail="Invalid artifact_name")
+
+    # otherwise treat it as a valid name and query DB
+    objs = (
+        db.query(ArtifactModel)
+        .filter(ArtifactModel.name == name)
+        .all()
+    )
+
+    if not objs:
+        # valid name format, but nothing in DB
+        raise HTTPException(status_code=404, detail="No such artifact")
+
+    # deterministic order
+    objs.sort(key=lambda o: o.id)
+
+    return [
+        ArtifactMetadataOut(name=o.name, id=str(o.id), type=ArtifactType(o.type))
+        for o in objs
+    ]
+
+
+# -------- Shared helper for ID-based lookups --------
 def _get_artifact_by_type_and_id(
     artifact_type: str,
     id: str,
@@ -284,7 +339,7 @@ def _get_artifact_by_type_and_id(
     """
     Shared logic for:
       - GET /artifacts/{artifact_type}/{id}
-      - GET /artifact/{artifact_type}/{id} (alias)
+      - GET /artifact/{artifact_type}/{id}
     """
     # Validate artifact_type
     if artifact_type not in VALID_TYPES:
@@ -295,16 +350,21 @@ def _get_artifact_by_type_and_id(
         raise HTTPException(status_code=400, detail="Invalid artifact id")
 
     # Our DB uses integer PKs; autograder sends numeric IDs.
-    if not id.isdigit():
-        raise HTTPException(status_code=400, detail="Invalid artifact id")
-
-    int_id = int(id)
+    # If it's not numeric but matches the pattern, treat it as "not found" (404).
+    try:
+        int_id = int(id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Artifact does not exist")
 
     obj = db.get(ArtifactModel, int_id)
     if not obj or obj.type != artifact_type:
         raise HTTPException(status_code=404, detail="Artifact does not exist")
 
-    metadata = ArtifactMetadataOut(name=obj.name, id=str(obj.id), type=ArtifactType(obj.type))
+    metadata = ArtifactMetadataOut(
+        name=obj.name,
+        id=str(obj.id),
+        type=ArtifactType(obj.type),
+    )
     data: Dict[str, Any] = {"url": obj.url} if obj.url else {}
 
     return ArtifactOut(metadata=metadata, data=data)
@@ -337,42 +397,3 @@ def get_artifact_phase2_singular(
     Autograder should use the plural route, but this is kept for safety.
     """
     return _get_artifact_by_type_and_id(artifact_type, id, db)
-
-
-@app.get("/artifact/byName/{name}", response_model=List[ArtifactMetadataOut])
-def get_artifact_by_name(
-    name: str,
-    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
-    db: Session = Depends(get_session),
-):
-    """
-    GET /artifact/byName/{name}
-
-    Return metadata for all artifacts whose name exactly matches `name`.
-
-    Spec:
-      - 200: list of ArtifactMetadata
-      - 400: invalid name (including "*")
-      - 404: no such artifact
-    """
-    # "*" is reserved for /artifacts queries, not valid here
-    if name == "*":
-        raise HTTPException(status_code=400, detail="Invalid artifact name '*'")
-
-    # Basic name validation
-    if not name or not NAME_PATTERN.fullmatch(name):
-        raise HTTPException(status_code=400, detail="Invalid artifact name")
-
-    objs = (
-        db.query(ArtifactModel)
-        .filter(ArtifactModel.name == name)
-        .all()
-    )
-
-    if not objs:
-        raise HTTPException(status_code=404, detail="No such artifact")
-
-    return [
-        ArtifactMetadataOut(name=o.name, id=str(o.id), type=ArtifactType(o.type))
-        for o in objs
-    ]
