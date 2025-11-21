@@ -42,7 +42,6 @@ class ArtifactsQueryIn(BaseModel):
 
 VALID_TYPES = {"model", "dataset", "code"}
 ID_PATTERN = re.compile(r"^[a-zA-Z0-9\-]+$")
-NAME_PATTERN = re.compile(r"^[\w\-\.\+]+$")  # letters/digits/_ . - +
 
 
 # ------------------- FASTAPI APP SETUP -------------------
@@ -62,6 +61,60 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+
+logging.basicConfig(
+    level=LOG_LEVEL,
+    format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+)
+
+logger = logging.getLogger("autograder")
+
+@app.middleware("http")
+async def log_requests(request, call_next):
+    """
+    Logs every request + response.
+    This is what you need to see what autograder is actually calling.
+    """
+    start = time.time()
+
+    # Basic request info
+    path = request.url.path
+    method = request.method
+    query = str(request.url.query)
+
+    # Don't log full auth token, just whether it's present
+    auth_header = request.headers.get("X-Authorization")
+    has_auth = auth_header is not None
+
+    # Try to read body safely (may fail if stream already consumed)
+    body_bytes = b""
+    try:
+        body_bytes = await request.body()
+    except Exception:
+        pass
+
+    body_preview = body_bytes.decode("utf-8", errors="ignore")
+    if len(body_preview) > 500:
+        body_preview = body_preview[:500] + "...(truncated)"
+
+    logger.info(
+        f"REQ {method} {path}"
+        + (f"?{query}" if query else "")
+        + f" | has_auth={has_auth} | body={body_preview}"
+    )
+
+    response = await call_next(request)
+
+    duration_ms = (time.time() - start) * 1000
+
+    logger.info(
+        f"RESP {method} {path} -> {response.status_code} ({duration_ms:.1f}ms)"
+    )
+
+    return response
 
 api = APIRouter(prefix="/api")
 
@@ -281,35 +334,45 @@ def artifact_by_regex(
     """
     POST /artifact/byRegEx
 
-    Body: { "regex": "<pattern>" }
-
-    Search over artifact names and descriptions.
-
-    Spec:
-      - 200: list of ArtifactMetadata on match
-      - 400: malformed/invalid regex
-      - 404: no artifact matches this regex
+    - 200: list of ArtifactMetadata
+    - 400: invalid regex
+    - 404: no matches
     """
+    logger.info(f"[byRegEx] regex received: {payload.regex}")
+
+    # Validate regex
     try:
         pattern = re.compile(payload.regex)
-    except re.error:
+    except re.error as e:
+        logger.warning(f"[byRegEx] INVALID regex -> 400 | error={e}")
         raise HTTPException(status_code=400, detail="Invalid artifact_regex")
 
-    matches: List[ArtifactModel] = []
+    artifacts = db.query(ArtifactModel).all()
+    logger.info(f"[byRegEx] DB contains {len(artifacts)} artifacts")
 
-    for a in db.query(ArtifactModel).all():
+    matches: List[ArtifactModel] = []
+    for a in artifacts:
         text_name = a.name or ""
         text_desc = a.description or ""
+
         if pattern.search(text_name) or pattern.search(text_desc):
             matches.append(a)
 
+    logger.info(f"[byRegEx] matches found = {len(matches)}")
+
     if not matches:
+        logger.info("[byRegEx] no matches -> 404")
         raise HTTPException(status_code=404, detail="No artifact found under this regex")
 
-    return [
+    response = [
         ArtifactMetadataOut(name=a.name, id=str(a.id), type=ArtifactType(a.type))
         for a in matches
     ]
+
+    logger.info(f"[byRegEx] returning {len(response)} results -> 200")
+
+    return response
+
 
 
 # -------- GET /artifact/byName/{name} (must be ABOVE {artifact_type}/{id}) --------
@@ -329,40 +392,67 @@ def get_artifact_by_name(
       - 400: invalid name (including "*")
       - 404: no such artifact
     """
-    import urllib.parse
 
-    # Decode URL encoding just to be safe (FastAPI usually does this, but harmless)
-    name = urllib.parse.unquote(name)
+    logger.info(f"[byName] raw name received: {name}")
+
+    # Decode URL encoding just to be safe
+    name_decoded = urllib.parse.unquote(name)
+    logger.info(f"[byName] decoded name: {name_decoded}")
 
     # 1) Reject "*" (reserved for POST /artifacts)
-    if name == "*":
-        raise HTTPException(status_code=400, detail="Invalid artifact_name: '*' is reserved")
+    if name_decoded == "*":
+        logger.warning("[byName] name is '*' -> 400")
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid artifact_name: '*' is reserved"
+        )
 
     # 2) Reject empty / whitespace-only
-    if not name or not name.strip():
-        raise HTTPException(status_code=400, detail="Invalid artifact_name")
+    if not name_decoded or not name_decoded.strip():
+        logger.warning("[byName] empty/whitespace name -> 400")
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid artifact_name"
+        )
 
     # 3) Reject control characters (non-printable)
-    if any(ord(c) < 32 or c == "\x7f" for c in name):
-        raise HTTPException(status_code=400, detail="Invalid artifact_name")
+    if any(ord(c) < 32 or c == "\x7f" for c in name_decoded):
+        logger.warning("[byName] control character detected -> 400")
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid artifact_name"
+        )
 
     # 4) Query DB for EXACT name match, sort by id ASC
+    logger.info(f"[byName] querying DB for exact name='{name_decoded}'")
+
     objs = (
         db.query(ArtifactModel)
-        .filter(ArtifactModel.name == name)
+        .filter(ArtifactModel.name == name_decoded)
         .order_by(ArtifactModel.id.asc())
         .all()
     )
 
-    if not objs:
-        # Valid name format, but no artifacts with this name
-        raise HTTPException(status_code=404, detail="No such artifact")
+    logger.info(f"[byName] DB matches found = {len(objs)}")
 
-    return [
-        ArtifactMetadataOut(name=o.name, id=str(o.id), type=ArtifactType(o.type))
+    if not objs:
+        logger.info("[byName] no matches -> 404")
+        raise HTTPException(
+            status_code=404,
+            detail="No such artifact"
+        )
+
+    response = [
+        ArtifactMetadataOut(
+            name=o.name,
+            id=str(o.id),
+            type=ArtifactType(o.type)
+        )
         for o in objs
     ]
 
+    logger.info(f"[byName] returning {len(response)} results -> 200")
+    return response
 
 
 # -------- Shared helper for ID-based lookups --------
@@ -374,42 +464,58 @@ def _get_artifact_by_type_and_id(
     """
     Shared logic for:
       - GET /artifacts/{artifact_type}/{id}
-      - GET /artifact/{artifact_type}/{id} (alias)
+      - GET /artifact/{artifact_type}/{id}
 
     Spec:
       - 200: artifact found
-      - 400: invalid artifact_type OR artifact_id *format*
-      - 404: valid format, but artifact doesn't exist / type mismatch
+      - 400: invalid type or invalid ID *format*
+      - 404: valid format, but ID not found or type mismatch
     """
-    # 1) Validate type
+
+    logger.info(f"[getByID] request received: type={artifact_type}, id={id}")
+
+    # ------------------ 1) Validate artifact_type ------------------
     if artifact_type not in VALID_TYPES:
+        logger.warning(f"[getByID] INVALID artifact_type '{artifact_type}' -> 400")
         raise HTTPException(status_code=400, detail="Invalid artifact_type")
 
-    # 2) Validate ID format against regex
+    # ------------------ 2) Validate ID format ------------------
     if not ID_PATTERN.fullmatch(id):
+        logger.warning(f"[getByID] ID pattern mismatch '{id}' -> 400")
         raise HTTPException(status_code=400, detail="Invalid artifact_id")
 
-    # 3) Try to convert to integer PK (our DB uses ints)
+    # ------------------ 3) Convert ID string → integer PK ------------------
     try:
         int_id = int(id)
+        logger.info(f"[getByID] Parsed id as integer: {int_id}")
     except ValueError:
-        # Format is okay per pattern, but can't be an actual row in our DB.
-        # -> According to spec: treat as "artifact does not exist".
+        logger.warning(f"[getByID] ID '{id}' matches pattern but not int -> 404")
         raise HTTPException(status_code=404, detail="Artifact does not exist")
 
-    # 4) Look up artifact in DB
+    # ------------------ 4) Query database ------------------
     obj = db.get(ArtifactModel, int_id)
-    if not obj or obj.type != artifact_type:
-        # Either no row, or type mismatch
+
+    if obj is None:
+        logger.info(f"[getByID] No DB row with PK={int_id} -> 404")
         raise HTTPException(status_code=404, detail="Artifact does not exist")
 
+    if obj.type != artifact_type:
+        logger.info(
+            f"[getByID] Type mismatch: DB has type={obj.type}, requested={artifact_type} -> 404"
+        )
+        raise HTTPException(status_code=404, detail="Artifact does not exist")
+
+    logger.info(f"[getByID] FOUND artifact id={obj.id} name='{obj.name}' type={obj.type}")
+
+    # ------------------ Build response ------------------
     metadata = ArtifactMetadataOut(
         name=obj.name,
         id=str(obj.id),
         type=ArtifactType(obj.type),
     )
-    data: Dict[str, Any] = {"url": obj.url} if obj.url else {}
+    data = {"url": obj.url} if obj.url else {}
 
+    logger.info(f"[getByID] returning artifact id={obj.id} -> 200")
     return ArtifactOut(metadata=metadata, data=data)
 
 
