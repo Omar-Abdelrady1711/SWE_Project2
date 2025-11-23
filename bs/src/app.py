@@ -611,4 +611,3 @@ def rate_model_artifact(
     size_score_latency=res.size_score_latency,
 )
 
-
