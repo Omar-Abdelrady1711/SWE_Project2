@@ -410,6 +410,26 @@ def list_artifacts_phase2(
         for a in page
     ]
 
+@app.get("/artifact", response_model=List[ArtifactMetadataOut])
+def get_all_artifacts(
+    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
+):
+    """
+    Get all artifacts in the system.
+    Returns a list of artifact metadata sorted by ID.
+    """
+    all_items = store.list_artifacts()
+    all_items.sort(key=lambda x: int(x["id"]))
+    
+    return [
+        ArtifactMetadataOut(
+            name=a["name"],
+            id=str(a["id"]),
+            type=ArtifactType(a["type"]),
+        )
+        for a in all_items
+    ]
+
 @app.get("/artifact/byName/{name}", response_model=List[ArtifactMetadataOut])
 def get_artifact_by_name(
     name: str,
