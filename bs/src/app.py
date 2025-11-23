@@ -69,7 +69,6 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
 logging.basicConfig(
