@@ -18,6 +18,7 @@ import re
 from typing import Dict, Any, Optional, List
 
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
 
 from bs.src.models_db import init_db, reset_db, get_session, ArtifactModel
 
