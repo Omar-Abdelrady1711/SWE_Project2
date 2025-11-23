@@ -62,15 +62,16 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 
 logging.basicConfig(
     level=LOG_LEVEL,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    force=True,
 )
 
 logger = logging.getLogger("autograder")
+logger.setLevel(LOG_LEVEL)
 
 @app.middleware("http")
 async def log_requests(request, call_next):
