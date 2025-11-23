@@ -126,6 +126,84 @@ async def log_requests(request, call_next):
 
 api = APIRouter(prefix="/api")
 
+import urllib.parse
+
+@app.get("/artifact/byName/{name}", response_model=List[ArtifactMetadataOut])
+def get_artifact_by_name(
+    name: str,
+    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
+    db: Session = Depends(get_session),
+):
+    """
+    GET /artifact/byName/{name}
+
+    Spec:
+      - 200: list of ArtifactMetadata for this name
+      - 400: invalid name (including "*")
+      - 404: no such artifact
+    """
+
+    logger.info(f"[byName] raw name received: {name}")
+
+    # Decode URL encoding just to be safe
+    name_decoded = urllib.parse.unquote(name)
+    logger.info(f"[byName] decoded name: {name_decoded}")
+
+    # 1) Reject "*" (reserved for POST /artifacts)
+    if name_decoded == "*":
+        logger.warning("[byName] name is '*' -> 400")
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid artifact_name: '*' is reserved"
+        )
+
+    # 2) Reject empty / whitespace-only
+    if not name_decoded or not name_decoded.strip():
+        logger.warning("[byName] empty/whitespace name -> 400")
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid artifact_name"
+        )
+
+    # 3) Reject control characters (non-printable)
+    if any(ord(c) < 32 or c == "\x7f" for c in name_decoded):
+        logger.warning("[byName] control character detected -> 400")
+        raise HTTPException(
+            status_code=400,
+            detail="Invalid artifact_name"
+        )
+
+    # 4) Query DB for EXACT name match, sort by id ASC
+    logger.info(f"[byName] querying DB for exact name='{name_decoded}'")
+
+    objs = (
+        db.query(ArtifactModel)
+        .filter(ArtifactModel.name == name_decoded)
+        .order_by(ArtifactModel.id.asc())
+        .all()
+    )
+
+    logger.info(f"[byName] DB matches found = {len(objs)}")
+
+    if not objs:
+        logger.info("[byName] no matches -> 404")
+        raise HTTPException(
+            status_code=404,
+            detail="No such artifact"
+        )
+
+    response = [
+        ArtifactMetadataOut(
+            name=o.name,
+            id=str(o.id),
+            type=ArtifactType(o.type)
+        )
+        for o in objs
+    ]
+
+    logger.info(f"[byName] returning {len(response)} results -> 200")
+    return response
+
 
 def health_response():
     return {"status": "ok", "phase": 2, "time": time.time()}
@@ -153,7 +231,6 @@ except Exception as e:
 @api.get("/")
 def api_root():
     return {"message": "Backend running", "docs": "/api/docs"}
-
 
 app.include_router(api)
 
@@ -379,87 +456,6 @@ def artifact_by_regex(
 
     logger.info(f"[byRegEx] returning {len(response)} results -> 200")
 
-    return response
-
-
-
-# -------- GET /artifact/byName/{name} (must be ABOVE {artifact_type}/{id}) --------
-import urllib.parse
-
-@app.get("/artifact/byName/{name}", response_model=List[ArtifactMetadataOut])
-def get_artifact_by_name(
-    name: str,
-    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
-    db: Session = Depends(get_session),
-):
-    """
-    GET /artifact/byName/{name}
-
-    Spec:
-      - 200: list of ArtifactMetadata for this name
-      - 400: invalid name (including "*")
-      - 404: no such artifact
-    """
-
-    logger.info(f"[byName] raw name received: {name}")
-
-    # Decode URL encoding just to be safe
-    name_decoded = urllib.parse.unquote(name)
-    logger.info(f"[byName] decoded name: {name_decoded}")
-
-    # 1) Reject "*" (reserved for POST /artifacts)
-    if name_decoded == "*":
-        logger.warning("[byName] name is '*' -> 400")
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid artifact_name: '*' is reserved"
-        )
-
-    # 2) Reject empty / whitespace-only
-    if not name_decoded or not name_decoded.strip():
-        logger.warning("[byName] empty/whitespace name -> 400")
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid artifact_name"
-        )
-
-    # 3) Reject control characters (non-printable)
-    if any(ord(c) < 32 or c == "\x7f" for c in name_decoded):
-        logger.warning("[byName] control character detected -> 400")
-        raise HTTPException(
-            status_code=400,
-            detail="Invalid artifact_name"
-        )
-
-    # 4) Query DB for EXACT name match, sort by id ASC
-    logger.info(f"[byName] querying DB for exact name='{name_decoded}'")
-
-    objs = (
-        db.query(ArtifactModel)
-        .filter(ArtifactModel.name == name_decoded)
-        .order_by(ArtifactModel.id.asc())
-        .all()
-    )
-
-    logger.info(f"[byName] DB matches found = {len(objs)}")
-
-    if not objs:
-        logger.info("[byName] no matches -> 404")
-        raise HTTPException(
-            status_code=404,
-            detail="No such artifact"
-        )
-
-    response = [
-        ArtifactMetadataOut(
-            name=o.name,
-            id=str(o.id),
-            type=ArtifactType(o.type)
-        )
-        for o in objs
-    ]
-
-    logger.info(f"[byName] returning {len(response)} results -> 200")
     return response
 
 
