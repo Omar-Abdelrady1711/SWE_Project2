@@ -10,3 +10,4 @@ passlib[argon2]
 python-jose[cryptography]
 cryptography
 argon2-cffi
+python-dotenv
