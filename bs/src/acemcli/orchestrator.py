@@ -6,9 +6,9 @@ from typing import Iterable, List, Tuple
 
 import orjson
 
-from acemcli.metrics.base import all_metrics
-from acemcli.models import MetricResult, Category
-from acemcli.config import load_config
+from .metrics.base import all_metrics
+from .models import MetricResult, Category
+from .config import load_config
 
 log = logging.getLogger(__name__)
 
@@ -60,6 +60,16 @@ def _merge(base: MetricResult, add: MetricResult) -> MetricResult:
     base.code_quality = pick(base.code_quality, add.code_quality)
     base.code_quality_latency = max(base.code_quality_latency, add.code_quality_latency)
 
+    base.reproducibility = pick(base.reproducibility, add.reproducibility)
+    base.reproducibility_latency = max(base.reproducibility_latency, add.reproducibility_latency)
+
+    base.reviewedness = pick(base.reviewedness, add.reviewedness)
+    base.reviewedness_latency = max(base.reviewedness_latency, add.reviewedness_latency)
+
+    base.tree_score = pick(base.tree_score, add.tree_score)
+    base.tree_score_latency = max(base.tree_score_latency, add.tree_score_latency)
+
+
     return base
 
 
@@ -68,7 +78,13 @@ def _compute_one(url: str, category: Category) -> MetricResult:
     if not contributing:
         raise ValueError(f"No metric supports URL: {url}")
 
-    results = [m.compute(url, category) for m in contributing]
+    results = []
+    for m in contributing:
+       try:
+           results.append(m.compute(url, category))
+       except Exception as e:
+           log.warning("metric %s failed for %s: %s", m.name, url, e)
+           results.append(MetricResult(name=url, category=category))
     base = results[0]
     for r in results[1:]:
         base = _merge(base, r)
@@ -83,6 +99,10 @@ def _compute_one(url: str, category: Category) -> MetricResult:
     net += WEIGHTS["dataset_and_code_score"] * base.dataset_and_code_score
     net += WEIGHTS["dataset_quality"] * base.dataset_quality
     net += WEIGHTS["code_quality"] * base.code_quality
+    if base.reviewedness >= 0:
+        net += 0.05 * base.reviewedness
+    net += 0.05 * base.reproducibility
+    net += 0.05 * base.tree_score
 
     base.net_score = max(0.0, min(1.0, net))
     base.net_score_latency = 0
@@ -147,6 +167,12 @@ def to_ndjson(res: MetricResult) -> str:
         "dataset_quality_latency": res.dataset_quality_latency,
         "code_quality": res.code_quality,
         "code_quality_latency": res.code_quality_latency,
+        "reproducibility": res.reproducibility,
+        "reproducibility_latency": res.reproducibility_latency,
+        "reviewedness": res.reviewedness,
+        "reviewedness_latency": res.reviewedness_latency,
+        "tree_score": res.tree_score,
+        "tree_score_latency": res.tree_score_latency,
     }
     # Return a text line (the CLI will print it).
     return orjson.dumps(payload).decode("utf-8")
