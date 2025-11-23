@@ -4,6 +4,13 @@ from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.middleware.cors import CORSMiddleware
 from mangum import Mangum
 
+# acemcli rating pipeline (phase 1 + phase 2)
+from bs.src.acemcli.orchestrator import _compute_one
+from bs.src.acemcli.models import Category as MetricCategory
+# IMPORTANT: import metrics package to force registration side-effects
+import bs.src.acemcli.metrics  # noqa: F401
+from bs.src.schemas import ModelRatingOut, SizeScoreOut
+
 import os
 import time
 import logging
@@ -68,9 +75,11 @@ LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
 logging.basicConfig(
     level=LOG_LEVEL,
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
+    force=True,
 )
 
 logger = logging.getLogger("autograder")
+logger.setLevel(LOG_LEVEL)
 
 @app.middleware("http")
 async def log_requests(request, call_next):
@@ -546,3 +555,64 @@ def get_artifact_phase2_singular(
     Autograder should use the plural route, but this is kept for safety.
     """
     return _get_artifact_by_type_and_id(artifact_type, id, db)
+
+@app.get("/artifact/model/{id}/rate", response_model=ModelRatingOut)
+def rate_model_artifact(
+    id: str,
+    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
+    db: Session = Depends(get_session),
+):
+    # 1) validate id format
+    if not ID_PATTERN.fullmatch(id):
+        raise HTTPException(status_code=400, detail="Invalid artifact_id")
+
+    try:
+        int_id = int(id)
+    except ValueError:
+        raise HTTPException(status_code=404, detail="Artifact does not exist")
+
+    # 2) fetch model from DB
+    obj = db.get(ArtifactModel, int_id)
+    if obj is None or obj.type != "model":
+        raise HTTPException(status_code=404, detail="Artifact does not exist")
+
+    # 3) compute via orchestrator (Phase 1 + Phase 2)
+    try:
+        res = _compute_one(obj.url, "MODEL")
+    except Exception as e:
+        logger.exception(f"[rate] failed for id={id}: {e}")
+        raise HTTPException(status_code=500, detail="Rating pipeline error")
+
+    # 4) adapt to OpenAPI response shape
+    size_score_out = SizeScoreOut(**res.size_score)
+
+    return ModelRatingOut(
+    name=res.name,
+    category=res.category,
+    net_score=res.net_score,
+    net_score_latency=res.net_score_latency,
+    ramp_up_time=res.ramp_up_time,
+    ramp_up_time_latency=res.ramp_up_time_latency,
+    bus_factor=res.bus_factor,
+    bus_factor_latency=res.bus_factor_latency,
+    performance_claims=res.performance_claims,
+    performance_claims_latency=res.performance_claims_latency,
+    license=res.license,
+    license_latency=res.license_latency,
+    dataset_and_code_score=res.dataset_and_code_score,
+    dataset_and_code_score_latency=res.dataset_and_code_score_latency,
+    dataset_quality=res.dataset_quality,
+    dataset_quality_latency=res.dataset_quality_latency,
+    code_quality=res.code_quality,
+    code_quality_latency=res.code_quality_latency,
+    reproducibility=res.reproducibility,
+    reproducibility_latency=res.reproducibility_latency,
+    reviewedness=res.reviewedness,
+    reviewedness_latency=res.reviewedness_latency,
+    tree_score=res.tree_score,
+    tree_score_latency=res.tree_score_latency,
+    size_score=size_score_out,
+    size_score_latency=res.size_score_latency,
+)
+
+
