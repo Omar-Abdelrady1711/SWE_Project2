@@ -484,18 +484,13 @@ def _get_artifact_by_type_and_id(
         raise HTTPException(status_code=400, detail="Invalid artifact_type")
 
     # ------------------ 2) Validate ID format ------------------
-    if not ID_PATTERN.fullmatch(id):
-        logger.warning(f"[getByID] ID pattern mismatch '{id}' -> 400")
-        raise HTTPException(status_code=400, detail="Invalid artifact_id")
+    if not id.isdigit():
+       logger.warning(f"[getByID] Invalid ID format '{id}' -> 400")
+       raise HTTPException(status_code=400, detail="Invalid artifact_id") 
 
-    # ------------------ 3) Convert ID string → integer PK ------------------
-    try:
-        int_id = int(id)
-        logger.info(f"[getByID] Parsed id as integer: {int_id}")
-    except ValueError:
-        logger.warning(f"[getByID] ID '{id}' matches pattern but not int -> 404")
-        raise HTTPException(status_code=404, detail="Artifact does not exist")
-
+    int_id = int(id)
+    logger.info(f"[getByID] Parsed id as integer: {int_id}")
+    
     # ------------------ 4) Query database ------------------
     obj = db.get(ArtifactModel, int_id)
 
