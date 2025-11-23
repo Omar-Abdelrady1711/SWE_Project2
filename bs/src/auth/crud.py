@@ -23,6 +23,8 @@ def get_user_by_id(db: Session, user_id: int):
 
 
 def delete_user(db: Session, user: models.User):
+    # Remove any tokens associated with this user first to avoid FK/NULL issues
+    db.query(models.Token).filter(models.Token.user_id == user.id).delete()
     db.delete(user)
     db.commit()
 
