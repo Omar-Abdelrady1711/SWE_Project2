@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, Header, Depends, HTTPException, Response
+from fastapi import FastAPI, APIRouter, Header, Depends, HTTPException, Response, Body
 from fastapi.responses import RedirectResponse
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.middleware.cors import CORSMiddleware
@@ -25,6 +25,17 @@ from bs.src.schemas import (
     ArtifactDataIn,
     ArtifactOut,
     ArtifactType,
+)
+
+# Authentication imports
+from bs.src.auth_schemas import LoginRequest, RegisterRequest, TokenResponse, UserInfo
+from bs.src.auth import (
+    authenticate_user,
+    create_access_token,
+    get_current_user,
+    require_admin,
+    create_user,
+    ACCESS_TOKEN_EXPIRE_MINUTES,
 )
 
 # ------------------- CORS / ENV / HELPERS -------------------
@@ -187,12 +198,13 @@ logger.setLevel(LOG_LEVEL)
 @app.middleware("http")
 async def log_requests(request, call_next):
     start = time.time()
+    _metrics["request_count"] += 1
 
     path = request.url.path
     method = request.method
     query = str(request.url.query)
 
-    auth_header = request.headers.get("X-Authorization")
+    auth_header = request.headers.get("X-Authorization") or request.headers.get("Authorization")
     has_auth = auth_header is not None
 
     body_bytes = b""
@@ -213,6 +225,9 @@ async def log_requests(request, call_next):
 
     response = await call_next(request)
 
+    if response.status_code >= 400:
+        _metrics["error_count"] += 1
+
     duration_ms = (time.time() - start) * 1000
     logger.info(f"RESP {method} {path} -> {response.status_code} ({duration_ms:.1f}ms)")
     return response
@@ -221,8 +236,35 @@ api = APIRouter(prefix="/api")
 
 # ------------------- HEALTH -------------------
 
+# Track basic metrics
+_metrics = {
+    "start_time": time.time(),
+    "request_count": 0,
+    "error_count": 0,
+    "upload_count": 0,
+    "download_count": 0,
+}
+
 def health_response():
-    return {"status": "ok", "phase": 2, "time": time.time()}
+    uptime_seconds = int(time.time() - _metrics["start_time"])
+    artifact_count = len(store.list_artifacts())
+    
+    return {
+        "status": "ok",
+        "phase": 2,
+        "time": time.time(),
+        "metrics": {
+            "uptime_seconds": uptime_seconds,
+            "uptime_formatted": f"{uptime_seconds // 3600}h {(uptime_seconds % 3600) // 60}m",
+            "total_requests": _metrics["request_count"],
+            "error_count": _metrics["error_count"],
+            "upload_count": _metrics["upload_count"],
+            "download_count": _metrics["download_count"],
+            "artifact_count": artifact_count,
+            "request_rate": round(_metrics["request_count"] / max(uptime_seconds, 1), 2),
+            "error_rate": round(_metrics["error_count"] / max(_metrics["request_count"], 1) * 100, 2),
+        }
+    }
 
 @api.get("/health")
 def api_health():
@@ -282,6 +324,70 @@ def reset_system(x_authorization: str | None = Header(default=None)):
     store.clear_all()
     return {"status": "reset"}
 
+# ------------------- AUTHENTICATION ENDPOINTS -------------------
+
+@app.post("/auth/login", response_model=TokenResponse)
+def login(credentials: LoginRequest):
+    """
+    Authenticate user and return JWT token.
+    
+    Default credentials:
+    - admin/admin123 (role: admin)
+    - user/user123 (role: user)
+    """
+    user = authenticate_user(credentials.username, credentials.password)
+    if not user:
+        raise HTTPException(
+            status_code=401,
+            detail="Incorrect username or password",
+        )
+    
+    # Create access token
+    access_token = create_access_token(
+        data={"sub": user["username"], "role": user["role"]}
+    )
+    
+    return TokenResponse(
+        access_token=access_token,
+        token_type="bearer",
+        expires_in=ACCESS_TOKEN_EXPIRE_MINUTES * 60,
+        user=UserInfo(
+            username=user["username"],
+            email=user["email"],
+            role=user["role"],
+        ),
+    )
+
+
+@app.post("/auth/register", response_model=UserInfo)
+def register(request: RegisterRequest, authorization: str = Header(None)):
+    """
+    Register a new user (admin only).
+    Regular users cannot self-register for security.
+    """
+    # Require admin authentication
+    require_admin(authorization)
+    
+    user = create_user(
+        username=request.username,
+        password=request.password,
+        email=request.email,
+        role=request.role,
+    )
+    
+    return UserInfo(
+        username=user["username"],
+        email=user["email"],
+        role=user["role"],
+    )
+
+
+@app.get("/auth/me", response_model=UserInfo)
+def get_current_user_info(authorization: str = Header(None)):
+    """Get current authenticated user information."""
+    user = get_current_user(authorization)
+    return UserInfo(**user)
+
 # ------------------- PHASE 2: ARTIFACT ENDPOINTS -------------------
 
 @app.post("/artifact/{artifact_type}", response_model=ArtifactOut, status_code=201)
@@ -307,6 +413,9 @@ def ingest_artifact_phase2(
 
     item = store.put_artifact(item)
     aid = int(item["id"])
+    
+    # Track upload metric
+    _metrics["upload_count"] += 1
 
     # If model: compute + store rating synchronously (baseline expectation)
     if artifact_type == "model":
@@ -426,6 +535,7 @@ def get_all_artifacts(
             name=a["name"],
             id=str(a["id"]),
             type=ArtifactType(a["type"]),
+            url=a.get("url"),  # URL is at top level, not in data
         )
         for a in all_items
     ]
@@ -461,7 +571,7 @@ def get_artifact_by_name(
 
 @app.post("/artifact/byRegEx", response_model=List[ArtifactMetadataOut])
 def artifact_by_regex(
-    payload: ArtifactRegExIn,
+    payload: ArtifactRegExIn = Body(...),
     x_authorization: str | None = Header(default=None, alias="X-Authorization"),
 ):
     try:
@@ -486,6 +596,7 @@ def artifact_by_regex(
             name=a["name"],
             id=str(a["id"]),
             type=ArtifactType(a["type"]),
+            url=a.get("url"),
         )
         for a in matches
     ]

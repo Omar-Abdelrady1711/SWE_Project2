@@ -3,11 +3,12 @@ import InputField from "../components/form/InputField.jsx";
 import PasswordField from "../components/form/PasswordField.jsx";
 import Button from "../components/ui/Button.jsx";
 import { useAuth } from "../context/AuthContext.jsx";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useLocation } from "react-router-dom";
 
 export default function Login() {
   const { login } = useAuth();
   const navigate = useNavigate();
+  const location = useLocation();
   const [form, setForm] = useState({ username: "", password: "" });
   const [errors, setErrors] = useState({});
   const [submitting, setSubmitting] = useState(false);
@@ -33,11 +34,13 @@ export default function Login() {
 
     setSubmitting(true);
     try {
-      // later will call the real API via AuthContext -> apiClient
       await login(form.username.trim(), form.password);
-      navigate("/", { replace: true });
+      // Redirect to the page they tried to access, or dashboard
+      const from = location.state?.from?.pathname || "/dashboard";
+      navigate(from, { replace: true });
     } catch (err) {
-      setSubmitErr("Invalid credentials or server error.");
+      const message = err.message || "Invalid credentials or server error.";
+      setSubmitErr(message);
     } finally {
       setSubmitting(false);
     }
@@ -47,6 +50,25 @@ export default function Login() {
     <main className="container" role="main" aria-labelledby="login-title">
       <h1 id="login-title">Welcome back</h1>
       <p className="p-muted">Sign in to ACME Trustworthy Register</p>
+
+      {/* Development credentials info */}
+      <div 
+        style={{
+          padding: "1rem",
+          backgroundColor: "#e7f3ff",
+          border: "1px solid #b3d9ff",
+          borderRadius: "4px",
+          marginBottom: "1.5rem",
+          fontSize: "0.875rem",
+        }}
+        role="note"
+      >
+        <strong>Test Credentials:</strong>
+        <ul style={{ margin: "0.5rem 0 0 1.5rem" }}>
+          <li>Admin: <code>admin</code> / <code>admin123</code></li>
+          <li>User: <code>user</code> / <code>user123</code></li>
+        </ul>
+      </div>
 
       <form onSubmit={onSubmit} noValidate>
         <InputField
