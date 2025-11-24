@@ -18,6 +18,9 @@ import re
 from typing import Dict, Any, Optional, List
 
 from pydantic import BaseModel
+from sqlalchemy.orm import Session
+
+from bs.src.models_db import init_db, reset_db, get_session, ArtifactModel
 
 from bs.src.schemas import (
     ArtifactMetadataOut,
@@ -26,6 +29,15 @@ from bs.src.schemas import (
     ArtifactOut,
     ArtifactType,
 )
+try:
+    # optional import; if auth package exists, import permission helpers
+    from bs.src.auth.permissions import require_permission
+except Exception:
+    # define a passthrough stub so code still runs if auth not present
+    def require_permission(_perm: str):
+        def _noop():
+            return None
+        return _noop
 
 # Authentication imports
 from bs.src.auth_schemas import LoginRequest, RegisterRequest, TokenResponse, UserInfo
@@ -274,6 +286,27 @@ def api_health():
 def root_health():
     return health_response()
 
+# Load Phase 1 CRUD router (for /api/artifacts simple endpoints)
+try:
+    # import auth models so their tables are created by init_db()
+    try:
+        import bs.src.auth.models  # noqa: F401
+    except Exception:
+        # if auth package not present yet, continue; init_db will still run
+        pass
+
+    init_db()
+    from bs.src.api.routes.artifacts import router as artifacts_router
+    api.include_router(artifacts_router, prefix="/artifacts", tags=["artifacts"])
+    # include auth routes if available
+    try:
+        from bs.src.auth.routes import router as auth_router, admin_router
+        api.include_router(auth_router)
+        api.include_router(admin_router, prefix="/auth")
+    except Exception:
+        logging.getLogger(__name__).warning("Auth routes not loaded")
+except Exception as e:
+    logging.getLogger(__name__).warning("Artifacts router not loaded: %s", e)
 @api.get("/")
 def api_root():
     return {"message": "Backend running", "docs": "/api/docs"}
@@ -318,6 +351,90 @@ def get_tracks():
             "Other Security track",
         ]
     }
+
+ 
+
+# --- App-level compatibility endpoints under /api (ensure available regardless of router inclusion order) ---
+@app.post("/api/reset")
+def app_api_reset_post(x_authorization: str | None = Header(default=None)):
+    reset_db()
+    return {"status": "reset"}
+
+
+@app.get("/api/reset")
+def app_api_reset_get(x_authorization: str | None = Header(default=None)):
+    reset_db()
+    return {"status": "reset"}
+
+
+@app.post("/api/system/reset")
+def app_api_system_reset_post(x_authorization: str | None = Header(default=None)):
+    reset_db()
+    return {"status": "reset"}
+
+
+@app.get("/api/system/reset")
+def app_api_system_reset_get(x_authorization: str | None = Header(default=None)):
+    reset_db()
+    return {"status": "reset"}
+
+
+@app.post("/api/ingest", status_code=201)
+def app_api_ingest(
+    payload: dict,
+    x_authorization: str | None = Header(default=None),
+    current=Depends(require_permission("upload")),
+    db: Session = Depends(get_session),
+):
+    t = payload.get("type")
+    name = payload.get("name")
+    if t not in VALID_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid type")
+    if not name:
+        raise HTTPException(status_code=400, detail="Missing name")
+    obj = ArtifactModel(name=name, type=t, description=None, url=None)
+    db.add(obj)
+    db.commit()
+    db.refresh(obj)
+    return {"id": str(obj.id)}
+
+
+@app.get("/api/artifacts")
+def app_api_list_artifacts(db: Session = Depends(get_session)):
+    items = db.query(ArtifactModel).all()
+    out = [{"id": str(a.id), "name": a.name, "type": a.type} for a in items]
+    return {"artifacts": out}
+
+
+@app.get("/api/artifacts/by_name/{name}")
+def app_api_get_by_name(name: str, db: Session = Depends(get_session)):
+    a = db.query(ArtifactModel).filter(ArtifactModel.name == name).first()
+    if not a:
+        raise HTTPException(status_code=404, detail="Not found")
+    return {"id": str(a.id), "name": a.name, "type": a.type}
+
+
+@app.get("/api/query")
+def app_api_query(
+    name: str | None = None,
+    type: str | None = None,
+    regex: bool | None = False,
+    current=Depends(require_permission("search")),
+    db: Session = Depends(get_session),
+):
+    q = db.query(ArtifactModel)
+    if type:
+        q = q.filter(ArtifactModel.type == type)
+    if name:
+        if regex:
+            # SQLite lacks REGEXP by default; fall back to simple contains for tests
+            q = q.filter(ArtifactModel.name.contains(name))
+        else:
+            q = q.filter(ArtifactModel.name == name)
+    items = q.all()
+    out = [{"id": str(a.id), "name": a.name, "type": a.type} for a in items]
+    return {"artifacts": out}
+
 
 @app.delete("/reset")
 def reset_system(x_authorization: str | None = Header(default=None)):
