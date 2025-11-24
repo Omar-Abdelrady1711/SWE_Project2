@@ -6,4 +6,8 @@ huggingface-hub>=0.24.0
 orjson>=3.9.0
 requests>=2.31.0
 sqlalchemy>=2.0
+passlib[argon2]
+python-jose[cryptography]
+cryptography
+argon2-cffi
 python-dotenv
