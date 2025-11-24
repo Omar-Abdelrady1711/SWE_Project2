@@ -26,6 +26,7 @@ class ArtifactMetadataOut(BaseModel):
     name: str
     id: str
     type: ArtifactType
+    url: Optional[str] = None  # Add URL field
 
 class ArtifactQueryIn(BaseModel):
     name: str

@@ -9,11 +9,11 @@ Here's how to add the custom exceptions to your existing metric:
 from acemcli.exceptions import MetricError, APIError, ValidationError, create_missing_data_error
 
 class DatasetAndCodeScoreMetric:
-    
+
     def calculate(self, url: str, repo_info: Dict[str, Any]) -> MetricResult:
         """Calculate dataset and code score with proper error handling."""
         start_time = time.time()
-        
+
         try:
             # Validate URL first
             if not url or not isinstance(url, str):
@@ -23,11 +23,11 @@ class DatasetAndCodeScoreMetric:
                     invalid_value=url,
                     expected_format="Non-empty string URL"
                 )
-            
+
             # Main computation with error handling
             try:
                 score = self._compute_score(url, repo_info)
-                
+
                 # Validate score range
                 if not 0 <= score <= 1:
                     raise ValidationError(
@@ -36,7 +36,7 @@ class DatasetAndCodeScoreMetric:
                         invalid_value=score,
                         expected_format="Float between 0.0 and 1.0"
                     )
-                
+
             except Exception as e:
                 # Wrap any computation errors in MetricError
                 raise MetricError(
@@ -46,16 +46,16 @@ class DatasetAndCodeScoreMetric:
                     computation_step="score_calculation",
                     original_exception=e
                 )
-            
+
             latency = int((time.time() - start_time) * 1000)
-            
+
             return MetricResult(
                 name="dataset_and_code_score",
                 score=score,
                 latency=latency,
                 category=Category.MODEL
             )
-            
+
         except (ValidationError, MetricError):
             # Re-raise our custom exceptions
             raise
@@ -64,12 +64,12 @@ class DatasetAndCodeScoreMetric:
             latency = int((time.time() - start_time) * 1000)
             raise MetricError(
                 f"Unexpected error in dataset code score calculation: {str(e)}",
-                metric_name="dataset_and_code_score", 
+                metric_name="dataset_and_code_score",
                 url=url,
                 computation_step="unexpected_error",
                 original_exception=e
             )
-    
+
     def _download_repo_safely(self, repo_id: str) -> Path:
         """Download repository with API error handling."""
         try:
@@ -101,12 +101,14 @@ class DatasetAndCodeScoreMetric:
 ## 🔧 Key Integration Patterns
 
 ### 1. **Input Validation**
+
 ```python
 if not url or not isinstance(url, str):
     raise ValidationError("Invalid URL", field_name="url", invalid_value=url)
 ```
 
 ### 2. **API Call Protection**
+
 ```python
 try:
     api_response = some_api_call()
@@ -117,6 +119,7 @@ except requests.HTTPError as e:
 ```
 
 ### 3. **Metric Computation Protection**
+
 ```python
 try:
     score = complex_calculation()
@@ -127,6 +130,7 @@ except Exception as e:
 ```
 
 ### 4. **Score Validation**
+
 ```python
 if not 0 <= score <= 1:
     raise create_metric_score_error("dataset_code_score", score)
