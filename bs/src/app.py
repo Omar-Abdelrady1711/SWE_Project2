@@ -41,7 +41,7 @@ except Exception:
 
 # Authentication imports
 from bs.src.auth_schemas import LoginRequest, RegisterRequest, TokenResponse, UserInfo
-from bs.src.auth import (
+from bs.src.jwt_auth import (
     authenticate_user,
     create_access_token,
     get_current_user,

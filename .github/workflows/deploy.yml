@@ -66,4 +66,4 @@ jobs:
             --output text)
           echo "Function: $FUNC"
           aws logs describe-log-groups --log-group-name-prefix "/aws/lambda/$FUNC" --output text
-          aws logs tail "/aws/lambda/$FUNC" --since 15m --follow=false
+          aws logs filter-log-events --log-group-name "/aws/lambda/$FUNC" --start-time $(($(date +%s -d "15 minutes ago") * 1000))  --filter-pattern "REPORT"   --limit 50  --descending --output text
