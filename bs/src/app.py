@@ -65,6 +65,19 @@ ID_PATTERN = re.compile(r"^[a-zA-Z0-9\-]+$")  # be permissive, then int() check
 
 PAGE_SIZE = 10000  # autograder never hits limit
 
+BAD_ARTIFACT_REGEX_MSG = (
+    "There is missing field(s) in the artifact_regex or it is formed improperly, or is invalid."
+)
+
+BAD_ARTIFACT_NAME_MSG = (
+    "There is missing field(s) in the artifact_name or it is formed improperly, or is invalid."
+)
+
+BAD_ARTIFACT_ID_OR_TYPE_MSG = (
+    "There is missing field(s) in the artifact_type or artifact_id or it is formed improperly, or is invalid."
+)
+
+
 class ArtifactRegExIn(BaseModel):
     regex: str
 
@@ -664,18 +677,20 @@ def get_artifact_by_name(
 ):
     name_decoded = urllib.parse.unquote(name)
 
-    if name_decoded == "*":
-        raise HTTPException(status_code=400, detail="Invalid artifact_name: '*' is reserved")
-    if not name_decoded or not name_decoded.strip():
-        raise HTTPException(status_code=400, detail="Invalid artifact_name")
+    # "*" or empty → 400 with spec message
+    if name_decoded == "*" or not name_decoded:
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_NAME_MSG)
+
+    # Control chars invalid
     if any(ord(c) < 32 or c == "\x7f" for c in name_decoded):
-        raise HTTPException(status_code=400, detail="Invalid artifact_name")
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_NAME_MSG)
 
     matches = [a for a in store.list_artifacts() if a["name"] == name_decoded]
     matches.sort(key=lambda x: int(x["id"]))
 
     if not matches:
-        raise HTTPException(status_code=404, detail="No such artifact")
+        # Spec 404 text, with period
+        raise HTTPException(status_code=404, detail="No such artifact.")
 
     return [
         ArtifactMetadataOut(
@@ -686,25 +701,35 @@ def get_artifact_by_name(
         for a in matches
     ]
 
+
 @app.post("/artifact/byRegEx", response_model=List[ArtifactMetadataOut])
 def artifact_by_regex(
     payload: ArtifactRegExIn = Body(...),
     x_authorization: str | None = Header(default=None, alias="X-Authorization"),
 ):
+    # Missing / empty regex → 400 per spec
+    if payload.regex is None or payload.regex == "":
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
+
     try:
         pattern = re.compile(payload.regex)
     except re.error:
-        raise HTTPException(status_code=400, detail="Invalid artifact_regex")
+        # Malformed regex → same 400 message
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
 
     matches = []
     for a in store.list_artifacts():
         text_name = a.get("name") or ""
+        # treat description as README/model card
         text_desc = a.get("description") or ""
         if pattern.search(text_name) or pattern.search(text_desc):
             matches.append(a)
 
     if not matches:
-        raise HTTPException(status_code=404, detail="No artifact found under this regex")
+        # 404 text must match spec exactly (including period)
+        raise HTTPException(
+            status_code=404, detail="No artifact found under this regex."
+        )
 
     matches.sort(key=lambda x: int(x["id"]))
 
@@ -718,20 +743,22 @@ def artifact_by_regex(
         for a in matches
     ]
 
+
 def _get_artifact_by_type_and_id(artifact_type: str, id: str) -> ArtifactOut:
     if artifact_type not in VALID_TYPES:
-        raise HTTPException(status_code=400, detail="Invalid artifact_type")
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_ID_OR_TYPE_MSG)
+
     if not ID_PATTERN.fullmatch(id):
-        raise HTTPException(status_code=400, detail="Invalid artifact_id")
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_ID_OR_TYPE_MSG)
 
     try:
         int_id = int(id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid artifact_id")
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_ID_OR_TYPE_MSG)
 
     obj = store.get_artifact(int_id)
     if obj is None or obj["type"] != artifact_type:
-        raise HTTPException(status_code=404, detail="Artifact does not exist")
+        raise HTTPException(status_code=404, detail="Artifact does not exist.")
 
     metadata = ArtifactMetadataOut(
         name=obj["name"],
@@ -740,6 +767,7 @@ def _get_artifact_by_type_and_id(artifact_type: str, id: str) -> ArtifactOut:
     )
     data = {"url": obj["url"]} if obj.get("url") else {}
     return ArtifactOut(metadata=metadata, data=data)
+
 
 @app.get("/artifacts/{artifact_type}/{id}", response_model=ArtifactOut)
 def get_artifact_phase2(
@@ -763,23 +791,21 @@ def delete_artifact_phase2(
     id: str,
     x_authorization: str | None = Header(default=None, alias="X-Authorization"),
 ):
-    if artifact_type not in VALID_TYPES:
-        raise HTTPException(status_code=400, detail="Invalid artifact_type")
-
-    if not ID_PATTERN.fullmatch(id):
-        raise HTTPException(status_code=400, detail="Invalid artifact_id")
+    if artifact_type not in VALID_TYPES or not ID_PATTERN.fullmatch(id):
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_ID_OR_TYPE_MSG)
 
     try:
         int_id = int(id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid artifact_id")
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_ID_OR_TYPE_MSG)
 
     obj = store.get_artifact(int_id)
     if obj is None or obj["type"] != artifact_type:
-        raise HTTPException(status_code=404, detail="Artifact does not exist")
+        raise HTTPException(status_code=404, detail="Artifact does not exist.")
 
     store.delete_artifact(int_id)
     return {"status": "deleted"}
+
 
 @app.get("/artifact/model/{id}/rate", response_model=ModelRatingOut)
 def rate_model_artifact(
@@ -787,20 +813,20 @@ def rate_model_artifact(
     x_authorization: str | None = Header(default=None, alias="X-Authorization"),
 ):
     if not ID_PATTERN.fullmatch(id):
-        raise HTTPException(status_code=400, detail="Invalid artifact_id")
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_ID_OR_TYPE_MSG)
 
     try:
         int_id = int(id)
     except ValueError:
-        raise HTTPException(status_code=400, detail="Invalid artifact_id")
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_ID_OR_TYPE_MSG)
 
     art = store.get_artifact(int_id)
     if art is None or art["type"] != "model":
-        raise HTTPException(status_code=404, detail="Artifact does not exist")
+        raise HTTPException(status_code=404, detail="Artifact does not exist.")
 
     rating = store.get_rating(int_id)
     if rating is None:
-        # should not happen with sync ingest, but safe fallback
-        raise HTTPException(status_code=404, detail="Artifact does not exist")
+        raise HTTPException(status_code=404, detail="Artifact does not exist.")
 
     return ModelRatingOut(**rating)
+
