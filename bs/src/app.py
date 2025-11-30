@@ -219,6 +219,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger("autograder")
 logger.setLevel(LOG_LEVEL)
+logger.setLevel(logging.DEBUG)
 
 @app.middleware("http")
 async def log_requests(request, call_next):
@@ -676,6 +677,8 @@ def get_artifact_by_name(
     x_authorization: str | None = Header(default=None, alias="X-Authorization"),
 ):
     name_decoded = urllib.parse.unquote(name)
+    
+    logger.debug(f"[byName] name={name!r}, decoded={name_decoded!r}")
 
     # "*" or empty → 400 with spec message
     if name_decoded == "*" or not name_decoded:
@@ -692,6 +695,8 @@ def get_artifact_by_name(
         # Spec 404 text, with period
         raise HTTPException(status_code=404, detail="No such artifact.")
 
+    logger.debug(f"[byName] matches={matches}")
+    
     return [
         ArtifactMetadataOut(
             name=a["name"],
@@ -710,6 +715,8 @@ def artifact_by_regex(
     # Missing / empty regex → 400 per spec
     if payload.regex is None or payload.regex == "":
         raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
+    
+    logger.debug(f"[regex] incoming regex={payload.regex!r}")
 
     try:
         pattern = re.compile(payload.regex)
@@ -732,6 +739,8 @@ def artifact_by_regex(
         )
 
     matches.sort(key=lambda x: int(x["id"]))
+    
+    logger.debug(f"[regex] matches found={len(matches)}: {matches}")
 
     return [
         ArtifactMetadataOut(
@@ -745,6 +754,8 @@ def artifact_by_regex(
 
 
 def _get_artifact_by_type_and_id(artifact_type: str, id: str) -> ArtifactOut:
+    logger.debug(f"[get_by_id] type={artifact_type}, id={id}")
+    
     if artifact_type not in VALID_TYPES:
         raise HTTPException(status_code=400, detail=BAD_ARTIFACT_ID_OR_TYPE_MSG)
 
@@ -766,6 +777,7 @@ def _get_artifact_by_type_and_id(artifact_type: str, id: str) -> ArtifactOut:
         type=ArtifactType(obj["type"]),
     )
     data = {"url": obj["url"]} if obj.get("url") else {}
+    logger.debug(f"[get_by_id] obj={obj}")
     return ArtifactOut(metadata=metadata, data=data)
 
 
