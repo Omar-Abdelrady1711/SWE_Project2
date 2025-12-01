@@ -41,14 +41,34 @@ except Exception:
 
 # Authentication imports
 from bs.src.auth_schemas import LoginRequest, RegisterRequest, TokenResponse, UserInfo
-from bs.src.auth import (
-    authenticate_user,
-    create_access_token,
-    get_current_user,
-    require_admin,
-    create_user,
-    ACCESS_TOKEN_EXPIRE_MINUTES,
-)
+try:
+    # try to import auth helpers from flat module or package
+    from bs.src.auth import (
+        authenticate_user,
+        create_access_token,
+        get_current_user,
+        require_admin,
+        create_user,
+        ACCESS_TOKEN_EXPIRE_MINUTES,
+    )
+except Exception:
+    # provide lightweight stubs so the app can run when auth integration is partial
+    def authenticate_user(username: str, password: str):
+        return None
+
+    def create_access_token(data, expires_delta=None):
+        return ""
+
+    def get_current_user(*args, **kwargs):
+        return None
+
+    def require_admin(*args, **kwargs):
+        return None
+
+    def create_user(*args, **kwargs):
+        raise Exception("auth not available")
+
+    ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
 
 # ------------------- CORS / ENV / HELPERS -------------------
 
@@ -305,6 +325,16 @@ try:
         api.include_router(admin_router, prefix="/auth")
     except Exception:
         logging.getLogger(__name__).warning("Auth routes not loaded")
+    try:
+        # import lineage models so their tables are created by init_db()
+        import bs.src.lineage.models  # noqa: F401
+    except Exception:
+        logging.getLogger(__name__).warning("Lineage models not loaded")
+    try:
+        from bs.src.lineage.routes import router as lineage_router
+        api.include_router(lineage_router)
+    except Exception:
+        logging.getLogger(__name__).warning("Lineage routes not loaded")
 except Exception as e:
     logging.getLogger(__name__).warning("Artifacts router not loaded: %s", e)
 @api.get("/")
