@@ -3,6 +3,7 @@ import Login from "./pages/Login.jsx";
 import TestDebug from "./pages/TestDebug.jsx";
 import Dashboard from "./pages/Dashboard.jsx";
 import Upload from "./pages/Upload.jsx";
+import UserManagement from "./pages/UserManagement.jsx";
 import ProtectedRoute from "./components/ProtectedRoute.jsx";
 
 export default function App() {
@@ -25,6 +26,15 @@ export default function App() {
         element={
           <ProtectedRoute>
             <Upload />
+          </ProtectedRoute>
+        }
+      />
+      
+      <Route
+        path="/users"
+        element={
+          <ProtectedRoute adminOnly>
+            <UserManagement />
           </ProtectedRoute>
         }
       />

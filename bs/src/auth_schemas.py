@@ -30,3 +30,12 @@ class UserInfo(BaseModel):
     username: str
     email: str
     role: str
+    is_active: bool = True
+    created_at: str | None = None
+
+
+class UpdateUserRequest(BaseModel):
+    """Update user request payload."""
+    email: EmailStr | None = None
+    role: str | None = Field(None, pattern="^(user|admin)$")
+    password: str | None = Field(None, min_length=6)
