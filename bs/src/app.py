@@ -40,13 +40,18 @@ except Exception:
         return _noop
 
 # Authentication imports
-from bs.src.auth_schemas import LoginRequest, RegisterRequest, TokenResponse, UserInfo
+from bs.src.auth_schemas import LoginRequest, RegisterRequest, TokenResponse, UserInfo, UpdateUserRequest
 from bs.src.jwt_auth import (
     authenticate_user,
     create_access_token,
     get_current_user,
     require_admin,
     create_user,
+    get_all_users,
+    get_user_by_username,
+    update_user,
+    delete_user,
+    init_default_users,
     ACCESS_TOKEN_EXPIRE_MINUTES,
 )
 
@@ -310,6 +315,18 @@ try:
         pass
 
     init_db()
+    
+    # Initialize default users (admin and user) if they don't exist
+    try:
+        from bs.src.models_db import SessionLocal
+        db = SessionLocal()
+        try:
+            init_default_users(db)
+        finally:
+            db.close()
+    except Exception as e:
+        logging.getLogger(__name__).warning("Failed to initialize default users: %s", e)
+    
     from bs.src.api.routes.artifacts import router as artifacts_router
     api.include_router(artifacts_router, prefix="/artifacts", tags=["artifacts"])
     # include auth routes if available
@@ -458,7 +475,7 @@ def reset_system(x_authorization: str | None = Header(default=None)):
 # ------------------- AUTHENTICATION ENDPOINTS -------------------
 
 @app.post("/auth/login", response_model=TokenResponse)
-def login(credentials: LoginRequest):
+def login(credentials: LoginRequest, db: Session = Depends(get_session)):
     """
     Authenticate user and return JWT token.
     
@@ -466,7 +483,7 @@ def login(credentials: LoginRequest):
     - admin/admin123 (role: admin)
     - user/user123 (role: user)
     """
-    user = authenticate_user(credentials.username, credentials.password)
+    user = authenticate_user(credentials.username, credentials.password, db)
     if not user:
         raise HTTPException(
             status_code=401,
@@ -491,19 +508,20 @@ def login(credentials: LoginRequest):
 
 
 @app.post("/auth/register", response_model=UserInfo)
-def register(request: RegisterRequest, authorization: str = Header(None)):
+def register(request: RegisterRequest, authorization: str = Header(None), db: Session = Depends(get_session)):
     """
     Register a new user (admin only).
     Regular users cannot self-register for security.
     """
     # Require admin authentication
-    require_admin(authorization)
+    require_admin(authorization, db)
     
     user = create_user(
         username=request.username,
         password=request.password,
         email=request.email,
         role=request.role,
+        db=db,
     )
     
     return UserInfo(
@@ -514,10 +532,61 @@ def register(request: RegisterRequest, authorization: str = Header(None)):
 
 
 @app.get("/auth/me", response_model=UserInfo)
-def get_current_user_info(authorization: str = Header(None)):
+def get_current_user_info(authorization: str = Header(None), db: Session = Depends(get_session)):
     """Get current authenticated user information."""
-    user = get_current_user(authorization)
+    user = get_current_user(authorization, db)
     return UserInfo(**user)
+
+
+@app.get("/auth/users", response_model=List[UserInfo])
+def list_all_users(authorization: str = Header(None), db: Session = Depends(get_session)):
+    """
+    Get all users (admin only).
+    Returns a list of all users in the system.
+    """
+    require_admin(authorization, db)
+    users = get_all_users(db)
+    return [UserInfo(**u) for u in users]
+
+
+@app.get("/auth/users/{username}", response_model=UserInfo)
+def get_user(username: str, authorization: str = Header(None), db: Session = Depends(get_session)):
+    """
+    Get a specific user by username (admin only).
+    """
+    require_admin(authorization, db)
+    user = get_user_by_username(username, db)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return UserInfo(**user)
+
+
+@app.put("/auth/users/{username}", response_model=UserInfo)
+def update_user_info(username: str, request: UpdateUserRequest, authorization: str = Header(None), db: Session = Depends(get_session)):
+    """
+    Update user information (admin only).
+    Can update email, role, and/or password.
+    """
+    require_admin(authorization, db)
+    user = update_user(
+        username=username,
+        db=db,
+        email=request.email,
+        role=request.role,
+        password=request.password,
+    )
+    return UserInfo(**user)
+
+
+@app.delete("/auth/users/{username}")
+def delete_user_account(username: str, authorization: str = Header(None), db: Session = Depends(get_session)):
+    """
+    Delete a user (admin only).
+    Cannot delete the admin user.
+    """
+    require_admin(authorization, db)
+    delete_user(username, db)
+    return {"message": f"User {username} deleted successfully"}
 
 # ------------------- PHASE 2: ARTIFACT ENDPOINTS -------------------
 

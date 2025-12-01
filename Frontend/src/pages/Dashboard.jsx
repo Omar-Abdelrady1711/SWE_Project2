@@ -277,7 +277,6 @@ export default function Dashboard() {
               }}
               aria-describedby="search-mode-desc"
             />
-            
             <div className="search-mode" id="search-mode-desc">
               <label>
                 <input
@@ -311,13 +310,24 @@ export default function Dashboard() {
             </div>
           </div>
 
-          <button
-            onClick={() => navigate("/upload")}
-            className="btn btn-primary"
-            aria-label="Upload new artifact"
-          >
-            <span aria-hidden="true">⬆️</span> Upload Artifact
-          </button>
+          <div className="action-buttons-group">
+            {isAdmin() && (
+              <button
+                onClick={() => navigate("/users")}
+                className="btn btn-secondary"
+                aria-label="Manage users"
+              >
+                <span aria-hidden="true">👥</span> Users
+              </button>
+            )}
+            <button
+              onClick={() => navigate("/upload")}
+              className="btn btn-primary"
+              aria-label="Upload new artifact"
+            >
+              <span aria-hidden="true">⬆️</span> Upload Artifact
+            </button>
+          </div>
         </section>
 
         {/* Error Display */}
