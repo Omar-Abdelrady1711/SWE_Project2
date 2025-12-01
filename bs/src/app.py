@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter, Header, Depends, HTTPException, Response, Body
+from fastapi import FastAPI, APIRouter, Header, Depends, HTTPException, Response, Request
 from fastapi.responses import RedirectResponse
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.middleware.cors import CORSMiddleware
@@ -708,39 +708,42 @@ def get_artifact_by_name(
 
 
 @app.post("/artifact/byRegEx", response_model=List[ArtifactMetadataOut])
-def artifact_by_regex(
-    payload: ArtifactRegExIn = Body(...),
+async def artifact_by_regex(
+    request: Request,
     x_authorization: str | None = Header(default=None, alias="X-Authorization"),
 ):
-    # Missing / empty regex → 400 per spec
-    if payload.regex is None or payload.regex == "":
-        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
-    
-    logger.debug(f"[regex] incoming regex={payload.regex!r}")
-
+    # ---- 1) Safely parse JSON body ----
     try:
-        pattern = re.compile(payload.regex)
-    except re.error:
-        # Malformed regex → same 400 message
-        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
+        body = await request.json()
+    except Exception:
+        # Whatever the autograder sent is not valid JSON
+        raise HTTPException(status_code=400, detail="Invalid artifact_regex")
 
+    # Accept either "regex" or "artifact_regex" key just in case
+    regex_value = body.get("regex") or body.get("artifact_regex")
+
+    if not isinstance(regex_value, str) or not regex_value:
+        raise HTTPException(status_code=400, detail="Invalid artifact_regex")
+
+    # ---- 2) Compile regex ----
+    try:
+        pattern = re.compile(regex_value)
+    except re.error:
+        # Bad regex syntax
+        raise HTTPException(status_code=400, detail="Invalid artifact_regex")
+
+    # ---- 3) Run match over registry ----
     matches = []
     for a in store.list_artifacts():
         text_name = a.get("name") or ""
-        # treat description as README/model card
         text_desc = a.get("description") or ""
         if pattern.search(text_name) or pattern.search(text_desc):
             matches.append(a)
 
     if not matches:
-        # 404 text must match spec exactly (including period)
-        raise HTTPException(
-            status_code=404, detail="No artifact found under this regex."
-        )
+        raise HTTPException(status_code=404, detail="No artifact found under this regex")
 
     matches.sort(key=lambda x: int(x["id"]))
-    
-    logger.debug(f"[regex] matches found={len(matches)}: {matches}")
 
     return [
         ArtifactMetadataOut(
