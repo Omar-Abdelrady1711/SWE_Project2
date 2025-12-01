@@ -7,8 +7,45 @@ Globals:
     Runtime: python3.12
     Timeout: 30
     MemorySize: 512
+    Environment:
+      Variables:
+        USERS_TABLE: !Ref UsersTable
+        ARTIFACTS_TABLE: !Ref ArtifactsTable
 
 Resources:
+  # DynamoDB Table for Users
+  UsersTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-Users"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: username
+          AttributeType: S
+      KeySchema:
+        - AttributeName: username
+          KeyType: HASH
+      Tags:
+        - Key: Application
+          Value: ACME-Registry
+
+  # DynamoDB Table for Artifacts
+  ArtifactsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-Artifacts"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: N
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+      Tags:
+        - Key: Application
+          Value: ACME-Registry
+
+  # Lambda Function
   RegistryApi:
     Type: AWS::Serverless::Function
     Properties:
@@ -17,6 +54,10 @@ Resources:
       Architectures: [x86_64]
       Policies:
         - AWSLambdaBasicExecutionRole
+        - DynamoDBCrudPolicy:
+            TableName: !Ref UsersTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ArtifactsTable
       Events:
         ApiEvent:
           Type: Api
@@ -28,3 +69,11 @@ Outputs:
   ApiUrl:
     Description: Base URL for API Gateway stage
     Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+
+  UsersTableName:
+    Description: DynamoDB table for users
+    Value: !Ref UsersTable
+
+  ArtifactsTableName:
+    Description: DynamoDB table for artifacts
+    Value: !Ref ArtifactsTable
