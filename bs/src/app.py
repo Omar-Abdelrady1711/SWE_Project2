@@ -16,6 +16,7 @@ import logging
 import urllib.parse
 import re
 from typing import Dict, Any, Optional, List
+import json
 
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -64,6 +65,7 @@ origins = [
 
 STAGE = os.getenv("API_GATEWAY_BASE_PATH", "/Prod")
 LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").upper()
+logger = logging.getLogger("uvicorn")
 
 VALID_TYPES = {"model", "dataset", "code"}
 ID_PATTERN = re.compile(r"^[a-zA-Z0-9\-]+$")  # be permissive, then int() check
@@ -81,6 +83,8 @@ BAD_ARTIFACT_NAME_MSG = (
 BAD_ARTIFACT_ID_OR_TYPE_MSG = (
     "There is missing field(s) in the artifact_type or artifact_id or it is formed improperly, or is invalid."
 )
+
+
 
 
 class ArtifactRegExIn(BaseModel):
