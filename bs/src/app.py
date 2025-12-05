@@ -2,6 +2,7 @@ from fastapi import FastAPI, APIRouter, Header, Depends, HTTPException, Response
 from fastapi.responses import RedirectResponse
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Body
 from mangum import Mangum
 
 # acemcli rating pipeline (phase 1 + phase 2)
@@ -16,6 +17,7 @@ import logging
 import urllib.parse
 import re
 from typing import Dict, Any, Optional, List
+import json
 
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -73,6 +75,9 @@ PAGE_SIZE = 10000  # autograder never hits limit
 BAD_ARTIFACT_REGEX_MSG = (
     "There is missing field(s) in the artifact_regex or it is formed improperly, or is invalid."
 )
+
+NO_ARTIFACT_FOR_REGEX_MSG = "No artifact found under this regex."
+
 
 BAD_ARTIFACT_NAME_MSG = (
     "There is missing field(s) in the artifact_name or it is formed improperly, or is invalid."
@@ -589,6 +594,74 @@ def delete_user_account(username: str, authorization: str = Header(None), db: Se
     return {"message": f"User {username} deleted successfully"}
 
 # ------------------- PHASE 2: ARTIFACT ENDPOINTS -------------------
+@app.post("/artifact/byRegEx", response_model=List[ArtifactMetadataOut])
+async def artifact_by_regex(
+    request: Request,
+    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
+):
+    """
+    BASELINE endpoint: search artifacts whose name or description matches a regex.
+    We must NOT return 422. All bad input -> 400 with BAD_ARTIFACT_REGEX_MSG.
+    No matches -> 404 with NO_ARTIFACT_FOR_REGEX_MSG.
+    """
+
+    # ---- 1) Read raw body ----
+    raw_body = await request.body()
+    logger.debug(f"[byRegEx] raw body={raw_body!r}")
+
+    if not raw_body.strip():
+        logger.debug("[byRegEx] empty body -> 400")
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
+
+    # ---- 2) Parse JSON manually ----
+    try:
+        body = json.loads(raw_body.decode("utf-8"))
+    except json.JSONDecodeError as e:
+        logger.debug(f"[byRegEx] JSON decode error: {e}")
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
+
+    if not isinstance(body, dict):
+        logger.debug(f"[byRegEx] body is not an object: {body!r}")
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
+
+    # Accept "regex" or "artifact_regex"
+    regex_value = body.get("regex") or body.get("artifact_regex")
+    logger.debug(f"[byRegEx] regex field={regex_value!r}")
+
+    if not isinstance(regex_value, str) or not regex_value:
+        logger.debug("[byRegEx] missing/empty regex field")
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
+
+    # ---- 3) Compile regex ----
+    try:
+        pattern = re.compile(regex_value)
+    except re.error as e:
+        logger.debug(f"[byRegEx] regex compile error: {e}")
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
+
+    # ---- 4) Search artifacts in store ----
+    artifacts = store.list_artifacts()
+    logger.debug(f"[byRegEx] searching {len(artifacts)} artifacts")
+
+    matches: list[ArtifactMetadataOut] = []
+    for a in artifacts:
+        name = a.get("name") or ""
+        desc = a.get("description") or ""
+        if pattern.search(name) or pattern.search(desc):
+            matches.append(
+                ArtifactMetadataOut(
+                    name=a["name"],
+                    id=str(a["id"]),
+                    type=ArtifactType(a["type"]),
+                )
+            )
+
+    if not matches:
+        logger.debug("[byRegEx] no matches -> 404")
+        raise HTTPException(status_code=404, detail=NO_ARTIFACT_FOR_REGEX_MSG)
+
+    logger.debug(f"[byRegEx] {len(matches)} matches found")
+    return matches
 
 @app.post("/artifact/{artifact_type}", response_model=ArtifactOut, status_code=201)
 def ingest_artifact_phase2(
@@ -774,56 +847,6 @@ def get_artifact_by_name(
         )
         for a in matches
     ]
-
-
-@app.post("/artifact/byRegEx", response_model=List[ArtifactMetadataOut])
-async def artifact_by_regex(
-    request: Request,
-    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
-):
-    # ---- 1) Safely parse JSON body ----
-    try:
-        body = await request.json()
-    except Exception:
-        # Whatever the autograder sent is not valid JSON
-        raise HTTPException(status_code=400, detail="Invalid artifact_regex")
-
-    # Accept either "regex" or "artifact_regex" key just in case
-    regex_value = body.get("regex") or body.get("artifact_regex")
-
-    if not isinstance(regex_value, str) or not regex_value:
-        raise HTTPException(status_code=400, detail="Invalid artifact_regex")
-
-    # ---- 2) Compile regex ----
-    try:
-        pattern = re.compile(regex_value)
-    except re.error:
-        # Bad regex syntax
-        raise HTTPException(status_code=400, detail="Invalid artifact_regex")
-
-    # ---- 3) Run match over registry ----
-    matches = []
-    for a in store.list_artifacts():
-        text_name = a.get("name") or ""
-        text_desc = a.get("description") or ""
-        if pattern.search(text_name) or pattern.search(text_desc):
-            matches.append(a)
-
-    if not matches:
-        raise HTTPException(status_code=404, detail="No artifact found under this regex")
-
-    matches.sort(key=lambda x: int(x["id"]))
-
-    return [
-        ArtifactMetadataOut(
-            name=a["name"],
-            id=str(a["id"]),
-            type=ArtifactType(a["type"]),
-            url=a.get("url"),
-        )
-        for a in matches
-    ]
-
 
 def _get_artifact_by_type_and_id(artifact_type: str, id: str) -> ArtifactOut:
     logger.debug(f"[get_by_id] type={artifact_type}, id={id}")
