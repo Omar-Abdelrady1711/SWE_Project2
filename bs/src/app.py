@@ -623,40 +623,6 @@ def delete_user_account(username: str, authorization: str = Header(None), db: Se
     return {"message": f"User {username} deleted successfully"}
 
 # ------------------- PHASE 2: ARTIFACT ENDPOINTS -------------------
-@app.get("/artifact/byName/{name}", response_model=List[ArtifactMetadataOut])
-def get_artifact_by_name(
-    name: str,
-    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
-):
-    name_decoded = urllib.parse.unquote(name)
-    
-    logger.debug(f"[byName] name={name!r}, decoded={name_decoded!r}")
-
-    # "*" or empty → 400 with spec message
-    if name_decoded == "*" or not name_decoded:
-        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_NAME_MSG)
-
-    # Control chars invalid
-    if any(ord(c) < 32 or c == "\x7f" for c in name_decoded):
-        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_NAME_MSG)
-
-    matches = [a for a in store.list_artifacts() if a["name"] == name_decoded]
-    matches.sort(key=lambda x: int(x["id"]))
-
-    if not matches:
-        # Spec 404 text, with period
-        raise HTTPException(status_code=404, detail="No such artifact.")
-
-    logger.debug(f"[byName] matches={matches}")
-    
-    return [
-        ArtifactMetadataOut(
-            name=a["name"],
-            id=str(a["id"]),
-            type=ArtifactType(a["type"]),
-        )
-        for a in matches
-    ]
 
 @app.post("/artifact/byRegEx", response_model=List[ArtifactMetadataOut])
 async def artifact_by_regex(
