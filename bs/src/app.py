@@ -422,20 +422,44 @@ def app_api_system_reset_get(x_authorization: str | None = Header(default=None))
 @app.post("/api/ingest", status_code=201)
 def app_api_ingest(
     payload: dict,
-    x_authorization: str | None = Header(default=None),
+    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
     current=Depends(require_permission("upload")),
     db: Session = Depends(get_session),
 ):
     t = payload.get("type")
     name = payload.get("name")
+
+    # basic validation, same as before
     if t not in VALID_TYPES:
         raise HTTPException(status_code=400, detail="Invalid type")
     if not name:
         raise HTTPException(status_code=400, detail="Missing name")
-    obj = ArtifactModel(name=name, type=t, description=None, url=None)
+
+    # 1) write to Phase-1 DB (unchanged behavior)
+    obj = ArtifactModel(
+        name=name,
+        type=t,
+        description=None,
+        url=None,
+    )
     db.add(obj)
     db.commit()
     db.refresh(obj)
+
+    # 2) NEW: mirror into the Phase-2 store so /artifact/* and regex can see it
+    store.put_artifact(
+        {
+            "id": obj.id,
+            "name": obj.name,
+            "type": obj.type,
+            "url": obj.url,              # will be None, that’s fine
+            "description": obj.description,
+            "created_at": time.time(),   # optional, but nice to have
+        }
+    )
+
+    logger.debug(f"[api/ingest] stored id={obj.id}, name={obj.name}, type={obj.type}")
+
     return {"id": str(obj.id)}
 
 
