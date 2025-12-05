@@ -394,24 +394,28 @@ def get_tracks():
 @app.post("/api/reset")
 def app_api_reset_post(x_authorization: str | None = Header(default=None)):
     reset_db()
+    store.clear_all()
     return {"status": "reset"}
 
 
 @app.get("/api/reset")
 def app_api_reset_get(x_authorization: str | None = Header(default=None)):
     reset_db()
+    store.clear_all()
     return {"status": "reset"}
 
 
 @app.post("/api/system/reset")
 def app_api_system_reset_post(x_authorization: str | None = Header(default=None)):
     reset_db()
+    store.clear_all()
     return {"status": "reset"}
 
 
 @app.get("/api/system/reset")
 def app_api_system_reset_get(x_authorization: str | None = Header(default=None)):
     reset_db()
+    store.clear_all()
     return {"status": "reset"}
 
 
