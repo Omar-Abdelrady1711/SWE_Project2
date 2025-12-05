@@ -29,17 +29,31 @@ def get_ancestors(session, model_id: str, depth: int | None = None) -> List[Dict
 
 
 def detect_cycle(session, model_id: str) -> bool:
-    # simple visited traversal to detect back-edge
-    visited = set()
-    stack = [model_id]
+    """Detect a cycle reachable from model_id using an iterative DFS with on-stack tracking."""
+    onstack: Set[str] = set()
+    stack: List[tuple[str, int]] = [(model_id, 0)]  # node, next-parent-index
+    parents_cache: Dict[str, List[Dict]] = {}
+
     while stack:
-        current = stack.pop()
-        if current in visited:
+        node, idx = stack[-1]
+        if node not in parents_cache:
+            parents_cache[node] = get_parents(session, node)
+            onstack.add(node)
+
+        parents = parents_cache[node]
+        if idx >= len(parents):
+            # done exploring this node
+            onstack.discard(node)
+            stack.pop()
+            continue
+
+        # explore next parent
+        pid = parents[idx].get("parent_id")
+        stack[-1] = (node, idx + 1)
+
+        if pid in onstack:
             return True
-        visited.add(current)
-        parents = get_parents(session, current)
-        for p in parents:
-            pid = p.get("parent_id")
-            if pid not in visited:
-                stack.append(pid)
+        if pid is not None:
+            stack.append((pid, 0))
+
     return False
