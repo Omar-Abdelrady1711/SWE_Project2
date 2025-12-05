@@ -32,12 +32,14 @@ jobs:
           role-to-assume: arn:aws:iam::052747538576:role/GitHubOIDCDeployRole
           aws-region: ${{ env.AWS_REGION }}
 
+      # Only install SAM CLI; use the runner's built-in AWS CLI v2
       - name: Install AWS SAM CLI
         run: |
           pip install aws-sam-cli
 
+      # Faster build: no --use-container unless you really need it
       - name: Build (SAM)
-        run: sam build --use-container
+        run: sam build
 
       - name: Deploy (SAM)
         run: |
@@ -60,9 +62,24 @@ jobs:
       - name: Tail Lambda logs on failure
         if: failure()
         run: |
-          echo "Deployment failed – showing recent Lambda logs"
-          # sam logs uses the deployed stack to find the function(s)
-          sam logs \
+          echo "Deployment failed – trying to show recent Lambda logs"
+          set +e
+          FUNC=$(aws cloudformation list-stack-resources \
             --stack-name ${{ env.STACK_NAME }} \
-            --tail \
-            --region ${{ env.AWS_REGION }} || true
+            --query "StackResourceSummaries[?ResourceType=='AWS::Lambda::Function'].PhysicalResourceId" \
+            --output text 2>/dev/null || true)
+          echo "Function: $FUNC"
+          if [ -n "$FUNC" ]; then
+            aws logs describe-log-groups \
+              --log-group-name-prefix "/aws/lambda/$FUNC" \
+              --output text || true
+
+            # last ~15 minutes of REPORT lines
+            START_TIME=$(($(date -u +%s -d "15 minutes ago") * 1000))
+            aws logs filter-log-events \
+              --log-group-name "/aws/lambda/$FUNC" \
+              --start-time "$START_TIME" \
+              --filter-pattern "REPORT" \
+              --limit 50 \
+              --output text || true
+          fi
