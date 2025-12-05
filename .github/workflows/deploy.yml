@@ -59,11 +59,8 @@ jobs:
       - name: Tail Lambda logs on failure
         if: failure()
         run: |
-          # Print the *last* function's logs from this stack
-          FUNC=$(aws cloudformation list-stack-resources \
-            --stack-name ${{ env.STACK_NAME }} \
-            --query "StackResourceSummaries[?ResourceType=='AWS::Lambda::Function'].PhysicalResourceId" \
-            --output text)
-          echo "Function: $FUNC"
-          aws logs describe-log-groups --log-group-name-prefix "/aws/lambda/$FUNC" --output text
-          aws logs filter-log-events --log-group-name "/aws/lambda/$FUNC" --start-time $(($(date +%s -d "15 minutes ago") * 1000))  --filter-pattern "REPORT"   --limit 50  --descending --output text
+          aws logs tail "$LOG_GROUP_NAME" \
+            --since 1h \
+            --follow \
+            --format short
+
