@@ -95,20 +95,16 @@ class ArtifactRegExIn(BaseModel):
 
 def _using_dynamo() -> bool:
     """
-    Use Dynamo ONLY if:
-      - LOCAL_MODE not enabled
-      - AWS creds exist
-      - DDB_TABLE exists
-    This prevents autograder/local runs from touching boto3.
+    Use Dynamo on AWS when not in LOCAL_MODE.
+    We accept either DDB_TABLE or ARTIFACTS_TABLE env var.
     """
     if os.getenv("LOCAL_MODE", "").lower() in {"1", "true", "yes"}:
         return False
-    return bool(
-        os.getenv("AWS_ACCESS_KEY_ID")
-        and os.getenv("AWS_SECRET_ACCESS_KEY")
-        and os.getenv("DDB_TABLE")
-        and os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", ""))
-    )
+
+    table_name = os.getenv("DDB_TABLE") or os.getenv("ARTIFACTS_TABLE")
+    region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
+
+    return bool(table_name and region)
 
 class LocalStore:
     """
