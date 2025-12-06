@@ -381,10 +381,7 @@ def get_tracks():
     # include access control track for autograder dependency
     return {
         "plannedTracks": [
-            "Performance track",
-            "Access control track",
-            "High assurance track",
-            "Other Security track",
+
         ]
     }
 
