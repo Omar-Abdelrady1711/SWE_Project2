@@ -7,6 +7,7 @@ class ArtifactType(str, Enum):
     dataset = "dataset"
     code = "code"
 
+#yes
 class ArtifactBase(BaseModel):
     name: str
     type: ArtifactType

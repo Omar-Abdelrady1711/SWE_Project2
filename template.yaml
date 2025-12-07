@@ -7,10 +7,6 @@ Globals:
     Runtime: python3.12
     Timeout: 30
     MemorySize: 512
-    Environment:
-      Variables:
-        USERS_TABLE: !Ref UsersTable
-        ARTIFACTS_TABLE: !Ref ArtifactsTable
 
 Resources:
   # DynamoDB Table for Users
@@ -48,10 +44,17 @@ Resources:
   # Lambda Function
   RegistryApi:
     Type: AWS::Serverless::Function
+    DependsOn:
+      - UsersTable
+      - ArtifactsTable
     Properties:
       Handler: bs.src.app.handler
       CodeUri: .
       Architectures: [x86_64]
+      Environment:
+        Variables:
+          USERS_TABLE: !Ref UsersTable
+          ARTIFACTS_TABLE: !Ref ArtifactsTable
       Policies:
         - AWSLambdaBasicExecutionRole
         - DynamoDBCrudPolicy:

@@ -2,6 +2,7 @@ from fastapi import FastAPI, APIRouter, Header, Depends, HTTPException, Response
 from fastapi.responses import RedirectResponse
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi import Body
 from mangum import Mangum
 
 # acemcli rating pipeline (phase 1 + phase 2)
@@ -16,6 +17,7 @@ import logging
 import urllib.parse
 import re
 from typing import Dict, Any, Optional, List
+import json
 
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -69,6 +71,25 @@ ID_PATTERN = re.compile(r"^[a-zA-Z0-9\-]+$")  # be permissive, then int() check
 
 PAGE_SIZE = 10000  # autograder never hits limit
 
+<<<<<<< HEAD
+=======
+BAD_ARTIFACT_REGEX_MSG = (
+    "There is missing field(s) in the artifact_regex or it is formed improperly, or is invalid."
+)
+
+NO_ARTIFACT_FOR_REGEX_MSG = "No artifact found under this regex."
+
+
+BAD_ARTIFACT_NAME_MSG = (
+    "There is missing field(s) in the artifact_name or it is formed improperly, or is invalid."
+)
+
+BAD_ARTIFACT_ID_OR_TYPE_MSG = (
+    "There is missing field(s) in the artifact_type or artifact_id or it is formed improperly, or is invalid."
+)
+
+
+>>>>>>> 9a7b5c7aa02574f6e087cd24a241c16e59e4dddb
 class ArtifactRegExIn(BaseModel):
     regex: str
 
@@ -349,10 +370,7 @@ def get_tracks():
     # include access control track for autograder dependency
     return {
         "plannedTracks": [
-            "Performance track",
-            "Access control track",
-            "High assurance track",
-            "Other Security track",
+
         ]
     }
 
@@ -362,44 +380,72 @@ def get_tracks():
 @app.post("/api/reset")
 def app_api_reset_post(x_authorization: str | None = Header(default=None)):
     reset_db()
+    store.clear_all()
     return {"status": "reset"}
 
 
 @app.get("/api/reset")
 def app_api_reset_get(x_authorization: str | None = Header(default=None)):
     reset_db()
+    store.clear_all()
     return {"status": "reset"}
 
 
 @app.post("/api/system/reset")
 def app_api_system_reset_post(x_authorization: str | None = Header(default=None)):
     reset_db()
+    store.clear_all()
     return {"status": "reset"}
 
 
 @app.get("/api/system/reset")
 def app_api_system_reset_get(x_authorization: str | None = Header(default=None)):
     reset_db()
+    store.clear_all()
     return {"status": "reset"}
 
 
 @app.post("/api/ingest", status_code=201)
 def app_api_ingest(
     payload: dict,
-    x_authorization: str | None = Header(default=None),
+    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
     current=Depends(require_permission("upload")),
     db: Session = Depends(get_session),
 ):
     t = payload.get("type")
     name = payload.get("name")
+
+    # basic validation, same as before
     if t not in VALID_TYPES:
         raise HTTPException(status_code=400, detail="Invalid type")
     if not name:
         raise HTTPException(status_code=400, detail="Missing name")
-    obj = ArtifactModel(name=name, type=t, description=None, url=None)
+
+    # 1) write to Phase-1 DB (unchanged behavior)
+    obj = ArtifactModel(
+        name=name,
+        type=t,
+        description=None,
+        url=None,
+    )
     db.add(obj)
     db.commit()
     db.refresh(obj)
+
+    # 2) NEW: mirror into the Phase-2 store so /artifact/* and regex can see it
+    store.put_artifact(
+        {
+            "id": obj.id,
+            "name": obj.name,
+            "type": obj.type,
+            "url": obj.url,              # will be None, that’s fine
+            "description": obj.description,
+            "created_at": time.time(),   # optional, but nice to have
+        }
+    )
+
+    logger.debug(f"[api/ingest] stored id={obj.id}, name={obj.name}, type={obj.type}")
+
     return {"id": str(obj.id)}
 
 
@@ -442,6 +488,7 @@ def app_api_query(
 
 @app.delete("/reset")
 def reset_system(x_authorization: str | None = Header(default=None)):
+    reset_db()
     store.clear_all()
     return {"status": "reset"}
 
@@ -560,6 +607,75 @@ def delete_user_account(username: str, authorization: str = Header(None)):
     return {"message": f"User {username} deleted successfully"}
 
 # ------------------- PHASE 2: ARTIFACT ENDPOINTS -------------------
+
+@app.post("/artifact/byRegEx", response_model=List[ArtifactMetadataOut])
+async def artifact_by_regex(
+    request: Request,
+    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
+):
+    """
+    BASELINE endpoint: search artifacts whose name or description matches a regex.
+    We must NOT return 422. All bad input -> 400 with BAD_ARTIFACT_REGEX_MSG.
+    No matches -> 404 with NO_ARTIFACT_FOR_REGEX_MSG.
+    """
+
+    # ---- 1) Read raw body ----
+    raw_body = await request.body()
+    logger.debug(f"[byRegEx] raw body={raw_body!r}")
+
+    if not raw_body.strip():
+        logger.debug("[byRegEx] empty body -> 400")
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
+
+    # ---- 2) Parse JSON manually ----
+    try:
+        body = json.loads(raw_body.decode("utf-8"))
+    except json.JSONDecodeError as e:
+        logger.debug(f"[byRegEx] JSON decode error: {e}")
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
+
+    if not isinstance(body, dict):
+        logger.debug(f"[byRegEx] body is not an object: {body!r}")
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
+
+    # Accept "regex" or "artifact_regex"
+    regex_value = body.get("regex") or body.get("artifact_regex")
+    logger.debug(f"[byRegEx] regex field={regex_value!r}")
+
+    if not isinstance(regex_value, str) or not regex_value:
+        logger.debug("[byRegEx] missing/empty regex field")
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
+
+    # ---- 3) Compile regex ----
+    try:
+        pattern = re.compile(regex_value)
+    except re.error as e:
+        logger.debug(f"[byRegEx] regex compile error: {e}")
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
+
+    # ---- 4) Search artifacts in store ----
+    artifacts = store.list_artifacts()
+    logger.debug(f"[byRegEx] searching {len(artifacts)} artifacts")
+
+    matches: list[ArtifactMetadataOut] = []
+    for a in artifacts:
+        name = a.get("name") or ""
+        desc = a.get("description") or ""
+        if pattern.search(name) or pattern.search(desc):
+            matches.append(
+                ArtifactMetadataOut(
+                    name=a["name"],
+                    id=str(a["id"]),
+                    type=ArtifactType(a["type"]),
+                )
+            )
+
+    if not matches:
+        logger.debug("[byRegEx] no matches -> 404")
+        raise HTTPException(status_code=404, detail=NO_ARTIFACT_FOR_REGEX_MSG)
+
+    logger.debug(f"[byRegEx] {len(matches)} matches found")
+    return matches
 
 @app.post("/artifact/{artifact_type}", response_model=ArtifactOut, status_code=201)
 def ingest_artifact_phase2(
@@ -740,6 +856,7 @@ def get_artifact_by_name(
         for a in matches
     ]
 
+<<<<<<< HEAD
 @app.post("/artifact/byRegEx", response_model=List[ArtifactMetadataOut])
 async def artifact_by_regex(
     request: Request,
@@ -788,6 +905,8 @@ async def artifact_by_regex(
         for a in matches
     ]
 
+=======
+>>>>>>> 9a7b5c7aa02574f6e087cd24a241c16e59e4dddb
 def _get_artifact_by_type_and_id(artifact_type: str, id: str) -> ArtifactOut:
     if artifact_type not in VALID_TYPES:
         raise HTTPException(status_code=400, detail="Invalid artifact_type")
