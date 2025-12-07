@@ -97,15 +97,20 @@ class ArtifactRegExIn(BaseModel):
 
 def _using_dynamo() -> bool:
     """
-    Use DynamoDB in AWS by default.
-    Only fall back to LocalStore if we *explicitly* set LOCAL_MODE=1/true/yes.
+    Use DynamoDB only when running inside AWS Lambda,
+    unless LOCAL_MODE explicitly disables it.
     """
-    # Local dev/testing override
+    # Explicit local override
     if os.getenv("LOCAL_MODE", "").lower() in {"1", "true", "yes"}:
         return False
 
-    # In autograder / AWS Lambda, we WANT Dynamo no matter what.
-    return True
+    # In Lambda (autograder / deployed API) → use DynamoDB
+    if os.getenv("AWS_LAMBDA_FUNCTION_NAME"):
+        return True
+
+    # Everything else (local uvicorn) → LocalStore
+    return False
+
 
 
 class LocalStore:
@@ -288,7 +293,14 @@ api = APIRouter(prefix="/api")
 
 def health_response():
     uptime_seconds = int(time.time() - _metrics["start_time"])
-    artifact_count = len(store.list_artifacts())
+
+    # Safely compute artifact_count – never let Dynamo errors crash /health
+    try:
+        artifacts = store.list_artifacts()
+        artifact_count = len(artifacts)
+    except Exception as e:
+        logger.error("health: failed to list artifacts: %s", e)
+        artifact_count = -1  # sentinel value
 
     return {
         "status": "ok",
@@ -306,6 +318,7 @@ def health_response():
             "error_rate": round(_metrics["error_count"] / max(_metrics["request_count"], 1) * 100, 2),
         },
     }
+
 
 
 @api.get("/health")
