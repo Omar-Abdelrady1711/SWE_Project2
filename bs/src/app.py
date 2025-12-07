@@ -415,10 +415,32 @@ def get_tracks():
 # --- App-level compatibility endpoints under /api (ensure available regardless of router inclusion order) ---
 
 @app.delete("/reset")
+@app.delete("/reset")
 def reset_system(x_authorization: str | None = Header(default=None)):
+    logger.info("reset_system: clearing DB and store")
+
+    # 1) Clear the relational DB
     reset_db()
-    store.clear_all()
+
+    # 2) Try to clear the artifact store (Local or Dynamo), but NEVER crash if it fails
+    try:
+        store.clear_all()
+    except Exception as e:
+        logger.warning("reset_system: store.clear_all() failed, ignoring: %s", e)
+
+    # 3) Recreate default users so /auth/login continues to work after reset
+    try:
+        from bs.src.models_db import SessionLocal
+        db = SessionLocal()
+        try:
+            init_default_users(db)
+        finally:
+            db.close()
+    except Exception as e:
+        logger.warning("reset_system: failed to re-init default users: %s", e)
+
     return {"status": "reset"}
+
 
 handler = Mangum(app, api_gateway_base_path=STAGE)
 
