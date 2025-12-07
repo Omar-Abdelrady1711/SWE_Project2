@@ -398,22 +398,19 @@ def get_tracks():
     # include access control track for autograder dependency
     return {
         "plannedTracks": [
-            {
-                "id": "access-control",
-                "name": "Access Control",
-                "description": "Implements JWT-based auth and role-based access control.",
-            }
+                "Access control track"
         ]
     }
 
 
 # --- App-level compatibility endpoints under /api (ensure available regardless of router inclusion order) ---
 
-@app.delete("/system/reset")
-def system_reset():
+@app.delete("/reset")
+def reset_system(x_authorization: str | None = Header(default=None)):
     reset_db()
     store.clear_all()
     return {"status": "reset"}
+
 
 
 @app.post("/api/ingest", status_code=201)
