@@ -5,6 +5,7 @@ stack_name = "acme-registry-staging"
 s3_prefix = "acme-registry-staging"
 capabilities = "CAPABILITY_IAM"
 image_repositories = []
+resolve_s3 = true
 
 [default.global.parameters]
 region = "us-east-1"
