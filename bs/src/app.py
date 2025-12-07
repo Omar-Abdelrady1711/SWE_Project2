@@ -97,19 +97,26 @@ class ArtifactRegExIn(BaseModel):
 
 def _using_dynamo() -> bool:
     """
-    Use DynamoDB only when running inside AWS Lambda,
-    unless LOCAL_MODE explicitly disables it.
+    Decide whether to use DynamoDB.
+
+    - Always use LocalStore if LOCAL_MODE is set.
+    - If running in AWS Lambda, always use DynamoStore.
+    - Otherwise, fall back to env var detection (for completeness).
     """
-    # Explicit local override
+    # 1) Force local dev to use in-memory store
     if os.getenv("LOCAL_MODE", "").lower() in {"1", "true", "yes"}:
         return False
 
-    # In Lambda (autograder / deployed API) → use DynamoDB
+    # 2) On Lambda: ALWAYS use Dynamo
     if os.getenv("AWS_LAMBDA_FUNCTION_NAME"):
         return True
 
-    # Everything else (local uvicorn) → LocalStore
-    return False
+    # 3) Fallback: if table + region configured, use Dynamo
+    table_name = os.getenv("DDB_TABLE") or os.getenv("ARTIFACTS_TABLE")
+    region = os.getenv("AWS_REGION") or os.getenv("AWS_DEFAULT_REGION")
+
+    return bool(table_name and region)
+
 
 
 
@@ -391,8 +398,6 @@ def custom_docs():
 
 
 
-handler = Mangum(app, api_gateway_base_path=STAGE)
-
 
 # ------------------- TRACKS & RESET -------------------
 
@@ -415,7 +420,7 @@ def reset_system(x_authorization: str | None = Header(default=None)):
     store.clear_all()
     return {"status": "reset"}
 
-
+handler = Mangum(app, api_gateway_base_path=STAGE)
 
 @app.post("/api/ingest", status_code=201)
 def app_api_ingest(
