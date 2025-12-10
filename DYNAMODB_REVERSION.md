@@ -56,7 +56,7 @@ USERS_DB = {
 
 ---
 
-### 2. **`template.yaml`** - Removed DynamoDB Resources
+### 2. **`template.yaml`** - Removed DynamoDB Resourcess
 
 **Removed:**
 
