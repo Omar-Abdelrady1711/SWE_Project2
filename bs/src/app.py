@@ -102,15 +102,27 @@ def _using_dynamo() -> bool:
     Use Dynamo ONLY if:
       - LOCAL_MODE not enabled
       - DDB_TABLE exists (table name is required)
-    Boto3 will use default credential chain (AWS CLI config, IAM role, etc.)
+      - AWS credentials are available (boto3 can connect)
+    This prevents autograder from trying to use DynamoDB.
     """
     if os.getenv("LOCAL_MODE", "").lower() in {"1", "true", "yes"}:
         return False
     
-    # Just check if we have a table name configured
-    # Boto3 will handle credentials automatically from AWS CLI config
+    # Check if table name is configured
     ddb_table = os.getenv("DDB_TABLE") or os.getenv("ARTIFACTS_TABLE")
-    return bool(ddb_table)
+    if not ddb_table:
+        return False
+    
+    # Verify AWS credentials are available by trying to create a boto3 client
+    try:
+        import boto3
+        sts = boto3.client('sts', region_name=os.getenv("AWS_REGION", "us-east-1"))
+        # Quick call to verify credentials work
+        sts.get_caller_identity()
+        return True
+    except Exception:
+        # No valid AWS credentials - fall back to local mode
+        return False
 
 class LocalStore:
     """
