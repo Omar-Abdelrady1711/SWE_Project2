@@ -5,6 +5,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi import Body
 from mangum import Mangum
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv not installed, will use system environment variables
+
 # acemcli rating pipeline (phase 1 + phase 2)
 from bs.src.acemcli.orchestrator import _compute_one
 # IMPORTANT: import metrics package to force registration side-effects
@@ -94,18 +101,16 @@ def _using_dynamo() -> bool:
     """
     Use Dynamo ONLY if:
       - LOCAL_MODE not enabled
-      - AWS creds exist
-      - DDB_TABLE exists
-    This prevents autograder/local runs from touching boto3.
+      - DDB_TABLE exists (table name is required)
+    Boto3 will use default credential chain (AWS CLI config, IAM role, etc.)
     """
     if os.getenv("LOCAL_MODE", "").lower() in {"1", "true", "yes"}:
         return False
-    return bool(
-        os.getenv("AWS_ACCESS_KEY_ID")
-        and os.getenv("AWS_SECRET_ACCESS_KEY")
-        and os.getenv("DDB_TABLE")
-        and os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", ""))
-    )
+    
+    # Just check if we have a table name configured
+    # Boto3 will handle credentials automatically from AWS CLI config
+    ddb_table = os.getenv("DDB_TABLE") or os.getenv("ARTIFACTS_TABLE")
+    return bool(ddb_table)
 
 class LocalStore:
     """
@@ -157,22 +162,20 @@ class DynamoStore:
         from bs.src.dynamo_store import (
             put_artifact as _put,
             get_artifact_by_id as _get,
-            scan_all_items as _scan_all,
-            delete_artifact_by_id as _del,
-            clear_all_items as _clear_all,
-            put_rating as _put_rating,
-            get_rating_by_id as _get_rating,
+            scan_all as _scan_all,
+            reset_all as _reset_all,
         )
         self._put = _put
         self._get = _get
         self._scan_all = _scan_all
-        self._del = _del
-        self._clear_all = _clear_all
-        self._put_rating = _put_rating
-        self._get_rating = _get_rating
+        self._reset_all = _reset_all
+        
+        # Initialize rating storage (simple dict for now, could be separate table)
+        self._ratings = {}
 
     def clear_all(self):
-        self._clear_all()
+        self._reset_all()
+        self._ratings.clear()
 
     def put_artifact(self, item: Dict[str, Any]) -> Dict[str, Any]:
         self._put(item)
@@ -182,16 +185,18 @@ class DynamoStore:
         return self._get(aid)
 
     def delete_artifact(self, aid: int) -> bool:
-        return self._del(aid)
+        # DynamoDB delete not implemented in dynamo_store.py yet
+        # For now, just return False
+        return False
 
     def list_artifacts(self) -> List[Dict[str, Any]]:
         return self._scan_all()
 
     def put_rating(self, aid: int, rating: Dict[str, Any]):
-        self._put_rating(aid, rating)
+        self._ratings[aid] = rating
 
     def get_rating(self, aid: int) -> Optional[Dict[str, Any]]:
-        return self._get_rating(aid)
+        return self._ratings.get(aid)
 
 # choose backend
 if _using_dynamo():
