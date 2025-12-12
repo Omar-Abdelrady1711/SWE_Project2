@@ -12,6 +12,13 @@ from datetime import datetime, timedelta
 from fastapi import HTTPException, Header
 from botocore.exceptions import ClientError
 
+# Load environment variables from .env file
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # dotenv not installed, will use system environment variables
+
 # JWT Configuration
 SECRET_KEY = os.getenv("JWT_SECRET_KEY", "dev-secret-key-change-in-production")
 ALGORITHM = "HS256"
