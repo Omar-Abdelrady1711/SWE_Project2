@@ -25,7 +25,7 @@ Successfully reverted all DynamoDB integration changes. The application now uses
 **Restored:**
 
 - ✅ Simple `USERS_DB` dictionary for in-memory storage
-- ✅ `verify_password()` now expects `bytes` instead of `str`
+- ✅ `verify_password()` now expects `bytes` instead of `strs`
 - ✅ `get_password_hash()` returns `bytes` instead of `str`
 - ✅ All user CRUD operations now use `USERS_DB` directly:
   - `authenticate_user()` → `USERS_DB.get(username)`
