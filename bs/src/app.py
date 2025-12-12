@@ -421,7 +421,6 @@ def app_api_system_reset_get(x_authorization: str | None = Header(default=None))
 def app_api_ingest(
     payload: dict,
     x_authorization: str | None = Header(default=None, alias="X-Authorization"),
-    current=Depends(require_permission("upload")),
     db: Session = Depends(get_session),
 ):
     t = payload.get("type")
@@ -481,7 +480,6 @@ def app_api_query(
     name: str | None = None,
     type: str | None = None,
     regex: bool | None = False,
-    current=Depends(require_permission("search")),
     db: Session = Depends(get_session),
 ):
     q = db.query(ArtifactModel)
