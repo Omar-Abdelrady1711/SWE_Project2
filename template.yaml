@@ -52,6 +52,11 @@ Resources:
         - DynamoDBCrudPolicy:
             TableName: !Ref RatingsTable
       Events:
+        RootEvent:
+          Type: Api
+          Properties:
+            Path: /
+            Method: GET
         ApiEvent:
           Type: Api
           Properties:
