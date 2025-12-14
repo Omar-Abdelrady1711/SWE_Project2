@@ -210,7 +210,8 @@ class LocalStore:
                     "name": a.name,
                     "type": a.type,
                     "description": a.description,
-                    "url": a.url
+                    "url": a.url,
+                    "readme": getattr(a, "readme", None),
                 }
                 for a in artifacts
             ]
@@ -284,17 +285,48 @@ else:
     print("⚠️ LOCAL_MODE or no AWS config → using SQLite store")
     
 def fetch_readme(url: str) -> str | None:
-    try:
-        if "huggingface.co" in url:
-            return requests.get(url + "/raw/main/README.md", timeout=5).text
-        if "github.com" in url:
-            parts = url.replace("https://github.com/", "").split("/")
-            return requests.get(
-                f"https://raw.githubusercontent.com/{parts[0]}/{parts[1]}/main/README.md",
-                timeout=5
-            ).text
-    except Exception:
+    candidates: list[str] = []
+
+    u = (url or "").strip()
+    if not u:
         return None
+
+    # 0) If they already gave a raw file URL, try it directly first
+    candidates.append(u)
+
+    # Helper: build base (strip query/fragment)
+    base = u.split("#", 1)[0].split("?", 1)[0].rstrip("/")
+
+    # 1) HuggingFace repo page -> try resolve + raw, main + master, md + rst
+    if "huggingface.co" in base and "/resolve/" not in base and "/raw/" not in base:
+        for branch in ("main", "master"):
+            for fname in ("README.md", "README.rst", "readme.md", "readme.rst"):
+                candidates.append(f"{base}/resolve/{branch}/{fname}")
+                candidates.append(f"{base}/raw/{branch}/{fname}")  # keep your old style too
+
+    # 2) GitHub repo page -> try raw README on main + master, md + rst (and lowercase)
+    if "github.com" in base and "raw.githubusercontent.com" not in base:
+        parts = base.replace("https://github.com/", "").strip("/").split("/")
+        if len(parts) >= 2:
+            owner, repo = parts[0], parts[1]
+            for branch in ("main", "master"):
+                for fname in ("README.md", "README.rst", "readme.md", "readme.rst"):
+                    candidates.append(
+                        f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{fname}"
+                    )
+
+    # 3) Try all candidates
+    for c in candidates:
+        try:
+            r = requests.get(c, timeout=5, headers={"User-Agent": "ece461-autograder"})
+            if r.status_code == 200 and r.text:
+                return r.text[:100_000]  # safety cap
+        except Exception:
+            pass
+
+    return None
+
+
 
 from urllib.parse import urlparse
 
