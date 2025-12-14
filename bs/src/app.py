@@ -22,7 +22,7 @@ import json
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from bs.src.models_db import init_db, reset_db, get_session, ArtifactModel
+from bs.src.models_db import init_db, reset_db, get_session, ArtifactModel, SessionLocal
 
 from bs.src.schemas import (
     ArtifactMetadataOut,
@@ -53,7 +53,6 @@ from bs.src.jwt_auth import (
     get_user_by_username,
     update_user,
     delete_user,
-    init_default_users,
     ACCESS_TOKEN_EXPIRE_MINUTES,
 )
 
@@ -78,7 +77,6 @@ BAD_ARTIFACT_REGEX_MSG = (
 
 NO_ARTIFACT_FOR_REGEX_MSG = "No artifact found under this regex."
 
-
 BAD_ARTIFACT_NAME_MSG = (
     "There is missing field(s) in the artifact_name or it is formed improperly, or is invalid."
 )
@@ -87,7 +85,6 @@ BAD_ARTIFACT_ID_OR_TYPE_MSG = (
     "There is missing field(s) in the artifact_type or artifact_id or it is formed improperly, or is invalid."
 )
 
-
 class ArtifactRegExIn(BaseModel):
     regex: str
 
@@ -95,8 +92,7 @@ class ArtifactRegExIn(BaseModel):
 
 class LocalStore:
     """
-    Simple in-memory store for autograder and Lambda.
-    Note: In Lambda, state only persists within a single instance's lifetime.
+    Simple in-memory store for artifacts and ratings.
     """
     def __init__(self):
         self.artifacts: Dict[int, Dict[str, Any]] = {}
@@ -109,7 +105,6 @@ class LocalStore:
         self._next_id = 1
 
     def put_artifact(self, item: Dict[str, Any]) -> Dict[str, Any]:
-        # if item already has id, respect it; else allocate
         if "id" not in item or item["id"] is None:
             item["id"] = self._next_id
             self._next_id += 1
@@ -135,7 +130,7 @@ class LocalStore:
     def get_rating(self, aid: int) -> Optional[Dict[str, Any]]:
         return self.ratings.get(aid)
 
-# Use simple in-memory store
+# Initialize store
 store = LocalStore()
 
 # ------------------- FASTAPI APP SETUP -------------------
@@ -163,7 +158,6 @@ logging.basicConfig(
 )
 logger = logging.getLogger("autograder")
 logger.setLevel(LOG_LEVEL)
-logger.setLevel(logging.DEBUG)
 
 @app.middleware("http")
 async def log_requests(request, call_next):
@@ -254,18 +248,6 @@ try:
         pass
 
     init_db()
-    
-    # Initialize default users (admin and user) if they don't exist
-    try:
-        from bs.src.models_db import SessionLocal
-        db = SessionLocal()
-        try:
-            init_default_users(db)
-        finally:
-            db.close()
-    except Exception as e:
-        logging.getLogger(__name__).warning("Failed to initialize default users: %s", e)
-    
     from bs.src.api.routes.artifacts import router as artifacts_router
     api.include_router(artifacts_router, prefix="/artifacts", tags=["artifacts"])
     # include auth routes if available
@@ -440,7 +422,7 @@ def reset_system(x_authorization: str | None = Header(default=None)):
 # ------------------- AUTHENTICATION ENDPOINTS -------------------
 
 @app.post("/auth/login", response_model=TokenResponse)
-def login(credentials: LoginRequest, db: Session = Depends(get_session)):
+def login(credentials: LoginRequest):
     """
     Authenticate user and return JWT token.
     
@@ -448,7 +430,7 @@ def login(credentials: LoginRequest, db: Session = Depends(get_session)):
     - admin/admin123 (role: admin)
     - user/user123 (role: user)
     """
-    user = authenticate_user(credentials.username, credentials.password, db)
+    user = authenticate_user(credentials.username, credentials.password)
     if not user:
         raise HTTPException(
             status_code=401,
@@ -473,20 +455,19 @@ def login(credentials: LoginRequest, db: Session = Depends(get_session)):
 
 
 @app.post("/auth/register", response_model=UserInfo)
-def register(request: RegisterRequest, authorization: str = Header(None), db: Session = Depends(get_session)):
+def register(request: RegisterRequest, authorization: str = Header(None)):
     """
     Register a new user (admin only).
     Regular users cannot self-register for security.
     """
     # Require admin authentication
-    require_admin(authorization, db)
+    require_admin(authorization)
     
     user = create_user(
         username=request.username,
         password=request.password,
         email=request.email,
         role=request.role,
-        db=db,
     )
     
     return UserInfo(
@@ -497,45 +478,44 @@ def register(request: RegisterRequest, authorization: str = Header(None), db: Se
 
 
 @app.get("/auth/me", response_model=UserInfo)
-def get_current_user_info(authorization: str = Header(None), db: Session = Depends(get_session)):
+def get_current_user_info(authorization: str = Header(None)):
     """Get current authenticated user information."""
-    user = get_current_user(authorization, db)
+    user = get_current_user(authorization)
     return UserInfo(**user)
 
 
 @app.get("/auth/users", response_model=List[UserInfo])
-def list_all_users(authorization: str = Header(None), db: Session = Depends(get_session)):
+def list_all_users(authorization: str = Header(None)):
     """
     Get all users (admin only).
     Returns a list of all users in the system.
     """
-    require_admin(authorization, db)
-    users = get_all_users(db)
+    require_admin(authorization)
+    users = get_all_users()
     return [UserInfo(**u) for u in users]
 
 
 @app.get("/auth/users/{username}", response_model=UserInfo)
-def get_user(username: str, authorization: str = Header(None), db: Session = Depends(get_session)):
+def get_user(username: str, authorization: str = Header(None)):
     """
     Get a specific user by username (admin only).
     """
-    require_admin(authorization, db)
-    user = get_user_by_username(username, db)
+    require_admin(authorization)
+    user = get_user_by_username(username)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")
     return UserInfo(**user)
 
 
 @app.put("/auth/users/{username}", response_model=UserInfo)
-def update_user_info(username: str, request: UpdateUserRequest, authorization: str = Header(None), db: Session = Depends(get_session)):
+def update_user_info(username: str, request: UpdateUserRequest, authorization: str = Header(None)):
     """
     Update user information (admin only).
     Can update email, role, and/or password.
     """
-    require_admin(authorization, db)
+    require_admin(authorization)
     user = update_user(
         username=username,
-        db=db,
         email=request.email,
         role=request.role,
         password=request.password,
@@ -544,13 +524,13 @@ def update_user_info(username: str, request: UpdateUserRequest, authorization: s
 
 
 @app.delete("/auth/users/{username}")
-def delete_user_account(username: str, authorization: str = Header(None), db: Session = Depends(get_session)):
+def delete_user_account(username: str, authorization: str = Header(None)):
     """
     Delete a user (admin only).
     Cannot delete the admin user.
     """
-    require_admin(authorization, db)
-    delete_user(username, db)
+    require_admin(authorization)
+    delete_user(username)
     return {"message": f"User {username} deleted successfully"}
 
 # ------------------- PHASE 2: ARTIFACT ENDPOINTS -------------------
@@ -780,26 +760,20 @@ def get_artifact_by_name(
     x_authorization: str | None = Header(default=None, alias="X-Authorization"),
 ):
     name_decoded = urllib.parse.unquote(name)
-    
-    logger.debug(f"[byName] name={name!r}, decoded={name_decoded!r}")
 
-    # "*" or empty → 400 with spec message
-    if name_decoded == "*" or not name_decoded:
-        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_NAME_MSG)
-
-    # Control chars invalid
+    if name_decoded == "*":
+        raise HTTPException(status_code=400, detail="Invalid artifact_name: '*' is reserved")
+    if not name_decoded or not name_decoded.strip():
+        raise HTTPException(status_code=400, detail="Invalid artifact_name")
     if any(ord(c) < 32 or c == "\x7f" for c in name_decoded):
-        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_NAME_MSG)
+        raise HTTPException(status_code=400, detail="Invalid artifact_name")
 
     matches = [a for a in store.list_artifacts() if a["name"] == name_decoded]
     matches.sort(key=lambda x: int(x["id"]))
 
     if not matches:
-        # Spec 404 text, with period
-        raise HTTPException(status_code=404, detail="No such artifact.")
+        raise HTTPException(status_code=404, detail="No such artifact")
 
-    logger.debug(f"[byName] matches={matches}")
-    
     return [
         ArtifactMetadataOut(
             name=a["name"],
@@ -809,23 +783,90 @@ def get_artifact_by_name(
         for a in matches
     ]
 
-def _get_artifact_by_type_and_id(artifact_type: str, id: str) -> ArtifactOut:
-    logger.debug(f"[get_by_id] type={artifact_type}, id={id}")
-    
-    if artifact_type not in VALID_TYPES:
-        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_ID_OR_TYPE_MSG)
+@app.post("/artifact/byRegEx", response_model=List[ArtifactMetadataOut])
+async def artifact_by_regex(
+    request: Request,
+    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
+):
+    """
+    BASELINE endpoint: search artifacts whose name or description matches a regex.
+    We must NOT return 422. All bad input -> 400 with BAD_ARTIFACT_REGEX_MSG.
+    No matches -> 404 with NO_ARTIFACT_FOR_REGEX_MSG.
+    """
 
+    # ---- 1) Read raw body ----
+    raw_body = await request.body()
+    logger.debug(f"[byRegEx] raw body={raw_body!r}")
+
+    if not raw_body.strip():
+        logger.debug("[byRegEx] empty body -> 400")
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
+
+    # ---- 2) Parse JSON manually ----
+    try:
+        body = json.loads(raw_body.decode("utf-8"))
+    except json.JSONDecodeError as e:
+        logger.debug(f"[byRegEx] JSON decode error: {e}")
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
+
+    if not isinstance(body, dict):
+        logger.debug(f"[byRegEx] body is not an object: {body!r}")
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
+
+    # Accept "regex" or "artifact_regex"
+    regex_value = body.get("regex") or body.get("artifact_regex")
+    logger.debug(f"[byRegEx] regex field={regex_value!r}")
+
+    if not isinstance(regex_value, str) or not regex_value:
+        logger.debug("[byRegEx] missing/empty regex field")
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
+
+    # ---- 3) Compile regex ----
+    try:
+        pattern = re.compile(regex_value)
+    except re.error as e:
+        logger.debug(f"[byRegEx] regex compile error: {e}")
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
+
+    # ---- 4) Search artifacts in store ----
+    artifacts = store.list_artifacts()
+    logger.debug(f"[byRegEx] searching {len(artifacts)} artifacts")
+
+    matches: list[ArtifactMetadataOut] = []
+    for a in artifacts:
+        name = a.get("name") or ""
+        desc = a.get("description") or ""
+        if pattern.search(name) or pattern.search(desc):
+            matches.append(
+                ArtifactMetadataOut(
+                    name=a["name"],
+                    id=str(a["id"]),
+                    type=ArtifactType(a["type"]),
+                    url=a.get("url"),
+                )
+            )
+
+    if not matches:
+        logger.debug("[byRegEx] no matches -> 404")
+        raise HTTPException(status_code=404, detail=NO_ARTIFACT_FOR_REGEX_MSG)
+
+    logger.debug(f"[byRegEx] {len(matches)} matches found")
+    return matches
+
+def _get_artifact_by_type_and_id(artifact_type: str, id: str) -> ArtifactOut:
+    if artifact_type not in VALID_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid artifact_type")
     if not ID_PATTERN.fullmatch(id):
-        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_ID_OR_TYPE_MSG)
+        raise HTTPException(status_code=400, detail="Invalid artifact_id")
 
     try:
         int_id = int(id)
     except ValueError:
-        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_ID_OR_TYPE_MSG)
+        raise HTTPException(status_code=400, detail="Invalid artifact_id")
 
     obj = store.get_artifact(int_id)
     if obj is None or obj["type"] != artifact_type:
-        raise HTTPException(status_code=404, detail="Artifact does not exist.")
+        raise HTTPException(status_code=404, detail="Artifact does not exist")
 
     metadata = ArtifactMetadataOut(
         name=obj["name"],
@@ -833,9 +874,7 @@ def _get_artifact_by_type_and_id(artifact_type: str, id: str) -> ArtifactOut:
         type=ArtifactType(obj["type"]),
     )
     data = {"url": obj["url"]} if obj.get("url") else {}
-    logger.debug(f"[get_by_id] obj={obj}")
     return ArtifactOut(metadata=metadata, data=data)
-
 
 @app.get("/artifacts/{artifact_type}/{id}", response_model=ArtifactOut)
 def get_artifact_phase2(
@@ -859,21 +898,23 @@ def delete_artifact_phase2(
     id: str,
     x_authorization: str | None = Header(default=None, alias="X-Authorization"),
 ):
-    if artifact_type not in VALID_TYPES or not ID_PATTERN.fullmatch(id):
-        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_ID_OR_TYPE_MSG)
+    if artifact_type not in VALID_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid artifact_type")
+
+    if not ID_PATTERN.fullmatch(id):
+        raise HTTPException(status_code=400, detail="Invalid artifact_id")
 
     try:
         int_id = int(id)
     except ValueError:
-        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_ID_OR_TYPE_MSG)
+        raise HTTPException(status_code=400, detail="Invalid artifact_id")
 
     obj = store.get_artifact(int_id)
     if obj is None or obj["type"] != artifact_type:
-        raise HTTPException(status_code=404, detail="Artifact does not exist.")
+        raise HTTPException(status_code=404, detail="Artifact does not exist")
 
     store.delete_artifact(int_id)
     return {"status": "deleted"}
-
 
 @app.get("/artifact/model/{id}/rate", response_model=ModelRatingOut)
 def rate_model_artifact(
@@ -881,19 +922,20 @@ def rate_model_artifact(
     x_authorization: str | None = Header(default=None, alias="X-Authorization"),
 ):
     if not ID_PATTERN.fullmatch(id):
-        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_ID_OR_TYPE_MSG)
+        raise HTTPException(status_code=400, detail="Invalid artifact_id")
 
     try:
         int_id = int(id)
     except ValueError:
-        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_ID_OR_TYPE_MSG)
+        raise HTTPException(status_code=400, detail="Invalid artifact_id")
 
     art = store.get_artifact(int_id)
     if art is None or art["type"] != "model":
-        raise HTTPException(status_code=404, detail="Artifact does not exist.")
+        raise HTTPException(status_code=404, detail="Artifact does not exist")
 
     rating = store.get_rating(int_id)
     if rating is None:
-        raise HTTPException(status_code=404, detail="Artifact does not exist.")
+        # should not happen with sync ingest, but safe fallback
+        raise HTTPException(status_code=404, detail="Artifact does not exist")
 
     return ModelRatingOut(**rating)
