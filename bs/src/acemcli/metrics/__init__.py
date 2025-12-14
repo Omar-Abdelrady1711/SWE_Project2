@@ -14,6 +14,9 @@ from . import local_repo
 from . import performance_claims
 from . import ramp_up_time
 from . import size_score
+from . import reproducibility
+from . import reviewedness
+from . import tree_score
 
 __all__ = [
     'base',
@@ -25,5 +28,8 @@ __all__ = [
     'local_repo',
     'performance_claims',
     'ramp_up_time',
-    'size_score'
+    'size_score',
+    "reproducibility",
+    "reviewedness",
+    "tree_score",
 ]

@@ -16,8 +16,8 @@ env:
 jobs:
   deploy:
     runs-on: ubuntu-latest
-    # environment: staging
     timeout-minutes: 20
+
     steps:
       - uses: actions/checkout@v4
 
@@ -32,12 +32,14 @@ jobs:
           role-to-assume: arn:aws:iam::052747538576:role/GitHubOIDCDeployRole
           aws-region: ${{ env.AWS_REGION }}
 
-      - name: Install AWS SAM CLI and AWS CLI
+      # Only install SAM CLI; use the runner's built-in AWS CLI v2
+      - name: Install AWS SAM CLI
         run: |
-          pip install awscli aws-sam-cli
+          pip install aws-sam-cli
 
+      # Faster build: no --use-container unless you really need it
       - name: Build (SAM)
-        run: sam build --use-container
+        run: sam build
 
       - name: Deploy (SAM)
         run: |
@@ -56,14 +58,28 @@ jobs:
             --output text)
           echo "Deployed API URL: $URL"
           curl -fsS "$URL/api/health"
+
       - name: Tail Lambda logs on failure
         if: failure()
         run: |
-          # Print the *last* function's logs from this stack
+          echo "Deployment failed – trying to show recent Lambda logs"
+          set +e
           FUNC=$(aws cloudformation list-stack-resources \
             --stack-name ${{ env.STACK_NAME }} \
             --query "StackResourceSummaries[?ResourceType=='AWS::Lambda::Function'].PhysicalResourceId" \
-            --output text)
+            --output text 2>/dev/null || true)
           echo "Function: $FUNC"
-          aws logs describe-log-groups --log-group-name-prefix "/aws/lambda/$FUNC" --output text
-          aws logs filter-log-events --log-group-name "/aws/lambda/$FUNC" --start-time $(($(date +%s -d "15 minutes ago") * 1000))  --filter-pattern "REPORT"   --limit 50  --descending --output text
+          if [ -n "$FUNC" ]; then
+            aws logs describe-log-groups \
+              --log-group-name-prefix "/aws/lambda/$FUNC" \
+              --output text || true
+
+            # last ~15 minutes of REPORT lines
+            START_TIME=$(($(date -u +%s -d "15 minutes ago") * 1000))
+            aws logs filter-log-events \
+              --log-group-name "/aws/lambda/$FUNC" \
+              --start-time "$START_TIME" \
+              --filter-pattern "REPORT" \
+              --limit 50 \
+              --output text || true
+          fi

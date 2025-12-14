@@ -30,8 +30,6 @@ class UserInfo(BaseModel):
     username: str
     email: str
     role: str
-    is_active: bool = True
-    created_at: str | None = None
 
 
 class UpdateUserRequest(BaseModel):
