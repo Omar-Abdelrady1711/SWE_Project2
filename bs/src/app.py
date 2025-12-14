@@ -22,7 +22,7 @@ import json
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
 
-from bs.src.models_db import init_db, reset_db, get_session, ArtifactModel
+from bs.src.models_db import init_db, reset_db, get_session, ArtifactModel, SessionLocal
 
 from bs.src.schemas import (
     ArtifactMetadataOut,
