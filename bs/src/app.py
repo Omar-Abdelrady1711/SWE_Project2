@@ -693,6 +693,61 @@ def delete_user_account(username: str, authorization: str = Header(None)):
     return {"message": f"User {username} deleted successfully"}
 
 # ------------------- PHASE 2: ARTIFACT ENDPOINTS -------------------
+@app.post("/artifact/byRegEx", response_model=List[ArtifactMetadataOut])
+async def artifact_by_regex(
+    request: Request,
+    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
+):
+    # ---- 1) Read raw body ----
+    raw_body = await request.body()
+    logger.debug(f"[byRegEx] raw body={raw_body!r}")
+
+    if not raw_body.strip():
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
+
+    # ---- 2) Parse JSON manually ----
+    try:
+        body = json.loads(raw_body.decode("utf-8"))
+    except json.JSONDecodeError:
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
+
+    if not isinstance(body, dict):
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
+
+    regex_value = body.get("regex") or body.get("artifact_regex")
+    if not isinstance(regex_value, str) or not regex_value:
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
+
+    # ---- 3) Compile regex ----
+    try:
+        pattern = re.compile(regex_value)
+    except re.error:
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
+
+    # ---- 4) Search artifacts in store ----
+    artifacts = store.list_artifacts()
+    matches: list[ArtifactMetadataOut] = []
+
+    for a in artifacts:
+        name = a.get("name") or ""
+        desc = a.get("description") or ""
+        readme = a.get("readme") or ""   # ✅ ADD THIS
+
+        if pattern.search(name) or pattern.search(desc) or pattern.search(readme):  # ✅ ADD readme
+            matches.append(
+                ArtifactMetadataOut(
+                    name=a["name"],
+                    id=str(a["id"]),
+                    type=ArtifactType(a["type"]),
+                    url=a.get("url"),
+                )
+            )
+
+    if not matches:
+        raise HTTPException(status_code=404, detail=NO_ARTIFACT_FOR_REGEX_MSG)
+
+    return matches
+
 @app.post("/artifact/{artifact_type}", response_model=ArtifactOut, status_code=201)
 def ingest_artifact_phase2(
     artifact_type: str,
@@ -874,61 +929,6 @@ def get_artifact_by_name(
         )
         for a in matches
     ]
-
-@app.post("/artifact/byRegEx", response_model=List[ArtifactMetadataOut])
-async def artifact_by_regex(
-    request: Request,
-    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
-):
-    # ---- 1) Read raw body ----
-    raw_body = await request.body()
-    logger.debug(f"[byRegEx] raw body={raw_body!r}")
-
-    if not raw_body.strip():
-        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
-
-    # ---- 2) Parse JSON manually ----
-    try:
-        body = json.loads(raw_body.decode("utf-8"))
-    except json.JSONDecodeError:
-        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
-
-    if not isinstance(body, dict):
-        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
-
-    regex_value = body.get("regex") or body.get("artifact_regex")
-    if not isinstance(regex_value, str) or not regex_value:
-        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
-
-    # ---- 3) Compile regex ----
-    try:
-        pattern = re.compile(regex_value)
-    except re.error:
-        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
-
-    # ---- 4) Search artifacts in store ----
-    artifacts = store.list_artifacts()
-    matches: list[ArtifactMetadataOut] = []
-
-    for a in artifacts:
-        name = a.get("name") or ""
-        desc = a.get("description") or ""
-        readme = a.get("readme") or ""   # ✅ ADD THIS
-
-        if pattern.search(name) or pattern.search(desc) or pattern.search(readme):  # ✅ ADD readme
-            matches.append(
-                ArtifactMetadataOut(
-                    name=a["name"],
-                    id=str(a["id"]),
-                    type=ArtifactType(a["type"]),
-                    url=a.get("url"),
-                )
-            )
-
-    if not matches:
-        raise HTTPException(status_code=404, detail=NO_ARTIFACT_FOR_REGEX_MSG)
-
-    return matches
 
 
 def _get_artifact_by_type_and_id(artifact_type: str, id: str) -> ArtifactOut:
