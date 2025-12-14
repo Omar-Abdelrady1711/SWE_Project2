@@ -1,8 +1,10 @@
 from fastapi import FastAPI, APIRouter, Header, Depends, HTTPException, Response, Request
-from fastapi.responses import RedirectResponse
+from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from mangum import Mangum
+from pathlib import Path
 
 # acemcli rating pipeline (phase 1 + phase 2)
 from bs.src.acemcli.orchestrator import _compute_one
@@ -491,10 +493,36 @@ def api_root():
 
 app.include_router(api)
 
+# ------------------- STATIC FILES & SPA FALLBACK -------------------
+# Serve the built Vite frontend from dist/ directory
+# This allows the autograder's Lighthouse to access the frontend at the API Gateway root
+
+# Determine the path to Frontend/dist relative to this file
+_FRONTEND_DIST = Path(__file__).resolve().parent.parent.parent / "Frontend" / "dist"
+
+def _serve_index():
+    """Serve the SPA index.html"""
+    index_path = _FRONTEND_DIST / "index.html"
+    if index_path.exists():
+        return FileResponse(index_path, media_type="text/html")
+    # Fallback if frontend not built
+    return HTMLResponse("<html><body><h1>Frontend not built</h1><p>Run 'npm run build' in Frontend/</p></body></html>")
+
 @app.get("/")
 def root():
-    return RedirectResponse(url="/api")
+    """Serve the frontend SPA at root"""
+    return _serve_index()
 
+# Mount static assets (JS, CSS, images) from dist/assets
+if _FRONTEND_DIST.exists():
+    # Mount assets subdirectory for Vite's hashed files
+    assets_dir = _FRONTEND_DIST / "assets"
+    if assets_dir.exists():
+        app.mount("/assets", StaticFiles(directory=str(assets_dir)), name="static-assets")
+    # Also mount the dist directory for other static files (favicon, etc.)
+    app.mount("/static", StaticFiles(directory=str(_FRONTEND_DIST)), name="static-root")
+
+# ---- Custom Swagger UI served via CDN ----
 @app.get("/docs", include_in_schema=False)
 def custom_docs():
     return get_swagger_ui_html(
@@ -512,6 +540,17 @@ def custom_docs_under_api():
         swagger_js_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js",
         swagger_css_url="https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css",
     )
+
+# SPA fallback for client-side routes (login, dashboard, etc.)
+# This must be defined after all other routes
+@app.get("/login")
+@app.get("/dashboard")
+@app.get("/upload")
+@app.get("/users")
+@app.get("/test")
+def spa_fallback():
+    """Serve index.html for SPA client-side routes"""
+    return _serve_index()
 
 handler = Mangum(app, api_gateway_base_path=STAGE)
 
