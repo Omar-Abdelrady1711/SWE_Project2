@@ -1,9 +1,40 @@
 from __future__ import annotations
+
 import time
+from urllib.parse import urlparse
+
 from huggingface_hub import HfApi
+
 from ..models import MetricResult, Category
 from .base import register
 from ..config import load_config
+
+
+def _parse_hf_repo_id(url: str) -> str:
+    """
+    Extract a Hugging Face repo_id from a URL.
+
+    Handles:
+    - https://huggingface.co/owner/name
+    - https://huggingface.co/name (single-segment)
+    - https://huggingface.co/owner/name/tree/main/...
+    - https://huggingface.co/owner/name/blob/main/...
+    - https://huggingface.co/owner/name/resolve/main/...
+    Ignores query params and fragments.
+    """
+    p = urlparse(url)
+    path = (p.path or "").strip("/")  # only the path, no query/fragment
+    if not path:
+        return ""
+
+    parts = [seg for seg in path.split("/") if seg]
+
+    # Keep only the first 2 segments if it looks like owner/name.
+    # If it's single-segment, keep it single (DO NOT prefix with "huggingface.co").
+    if len(parts) >= 2:
+        return "/".join(parts[:2])
+    return parts[0]
+
 
 class HFAPIMetric:
     name = "hf_api"
@@ -18,21 +49,11 @@ class HFAPIMetric:
 
     def compute(self, url: str, category: Category) -> MetricResult:
         t0 = time.perf_counter()
-        # robust parsing: support both owner/name and single-segment model ids
-        repo_id = url.rstrip("/").replace("https://huggingface.co/", "").lstrip("/")
-        if "/" in repo_id:
-            namespace, repo = repo_id.split("/", 1)
-        else:
-            # preserve previous behavior: use hostname as namespace so HF may
-            # resolve the canonical owner via API redirects for single-part IDs
-            namespace = "huggingface.co"
-            repo = repo_id
+
+        repo_id = _parse_hf_repo_id(url) or url.rstrip("/").replace("https://huggingface.co/", "").lstrip("/")
+
         is_model = category == "MODEL"
-        meta = (
-            self.api.model_info(f"{namespace}/{repo}")
-            if is_model else
-            self.api.dataset_info(f"{namespace}/{repo}")
-        )
+        meta = self.api.model_info(repo_id) if is_model else self.api.dataset_info(repo_id)
 
         def squash(n: int, k: float = 1000.0) -> float:
             return min(1.0, n / (n + k))
@@ -40,21 +61,31 @@ class HFAPIMetric:
         downloads = getattr(meta, "downloads", 0) or 0
         likes = getattr(meta, "likes", 0) or 0
         ramp = min(1.0, 0.3 + 0.7 * squash(likes, 100.0))
-        bus  = min(1.0, 0.2 + 0.8 * squash(downloads, 10_000.0))
+        bus = min(1.0, 0.2 + 0.8 * squash(downloads, 10_000.0))
 
         latency_ms = int((time.perf_counter() - t0) * 1000)
         return MetricResult(
-            name=f"{namespace}/{repo}", category=category,
-            net_score=0.0, net_score_latency=0,
-            ramp_up_time=ramp, ramp_up_time_latency=latency_ms,
-            bus_factor=bus, bus_factor_latency=latency_ms,
-            performance_claims=0.5, performance_claims_latency=latency_ms,
-            license=0.5, license_latency=latency_ms,
+            name=repo_id,  # Fix 3: don't return "huggingface.co/<id>"
+            category=category,
+            net_score=0.0,
+            net_score_latency=0,
+            ramp_up_time=ramp,
+            ramp_up_time_latency=latency_ms,
+            bus_factor=bus,
+            bus_factor_latency=latency_ms,
+            performance_claims=0.5,
+            performance_claims_latency=latency_ms,
+            license=0.5,
+            license_latency=latency_ms,
             size_score={"raspberry_pi": 0.0, "jetson_nano": 0.0, "desktop_pc": 0.0, "aws_server": 0.0},
             size_score_latency=0,
-            dataset_and_code_score=0.5, dataset_and_code_score_latency=latency_ms,
-            dataset_quality=0.5, dataset_quality_latency=latency_ms,
-            code_quality=0.5, code_quality_latency=latency_ms,
+            dataset_and_code_score=0.5,
+            dataset_and_code_score_latency=latency_ms,
+            dataset_quality=0.5,
+            dataset_quality_latency=latency_ms,
+            code_quality=0.5,
+            code_quality_latency=latency_ms,
         )
+
 
 register(HFAPIMetric())
