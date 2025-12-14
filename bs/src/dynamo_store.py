@@ -74,6 +74,8 @@ def put_artifact(item: Dict[str, Any]) -> None:
         ddb_item["description"] = str(item["description"])
     if item.get("created_at"):
         ddb_item["created_at"] = str(item["created_at"])
+    if item.get("readme"):
+        ddb_item["readme"] = str(item["readme"])
     
     table.put_item(Item=ddb_item)
 

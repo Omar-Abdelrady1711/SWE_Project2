@@ -18,6 +18,7 @@ import urllib.parse
 import re
 from typing import Dict, Any, Optional, List
 import json
+import requests
 
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -42,77 +43,19 @@ except Exception:
         return _noop
 
 # Authentication imports
-from bs.src.auth_schemas import (
-    LoginRequest,
-    RegisterRequest,
-    TokenResponse,
-    UserInfo,
-    UpdateUserRequest,
+from bs.src.auth_schemas import LoginRequest, RegisterRequest, TokenResponse, UserInfo, UpdateUserRequest
+from bs.src.jwt_auth import (
+    authenticate_user,
+    create_access_token,
+    get_current_user,
+    require_admin,
+    create_user,
+    get_all_users,
+    get_user_by_username,
+    update_user,
+    delete_user,
+    ACCESS_TOKEN_EXPIRE_MINUTES,
 )
-
-# Prefer the new `bs.src.auth` package (if present). Fall back to legacy `bs.src.jwt_auth`.
-try:
-    from bs.src.auth import (
-        authenticate_user,
-        create_access_token,
-        get_current_user,
-        require_admin,
-        create_user,
-        get_all_users,
-        get_user_by_username,
-        update_user,
-        delete_user,
-        init_default_users,
-        ACCESS_TOKEN_EXPIRE_MINUTES,
-    )
-except Exception:
-    try:
-        from bs.src.jwt_auth import (
-            authenticate_user,
-            create_access_token,
-            get_current_user,
-            require_admin,
-            create_user,
-            get_all_users,
-            get_user_by_username,
-            update_user,
-            delete_user,
-            init_default_users,
-            ACCESS_TOKEN_EXPIRE_MINUTES,
-        )
-    except Exception:
-        # provide lightweight stubs so the app can run when auth integration is partial
-        def authenticate_user(*args, **kwargs):
-            return None
-
-        def create_access_token(*args, **kwargs):
-            return ""
-
-        def get_current_user(*args, **kwargs):
-            return None
-
-        def require_admin(*args, **kwargs):
-            return None
-
-        def create_user(*args, **kwargs):
-            raise Exception("auth not available")
-
-        def get_all_users(*args, **kwargs):
-            return []
-
-        def get_user_by_username(*args, **kwargs):
-            return None
-
-        def update_user(*args, **kwargs):
-            raise Exception("auth not available")
-
-        def delete_user(*args, **kwargs):
-            raise Exception("auth not available")
-
-        def init_default_users(*args, **kwargs):
-            return None
-
-        ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24
 
 # ------------------- CORS / ENV / HELPERS -------------------
 
@@ -182,29 +125,34 @@ class LocalStore:
         self.ratings.clear()
 
     def put_artifact(self, item: Dict[str, Any]) -> Dict[str, Any]:
-        # Save to SQL database
         db = SessionLocal()
         try:
             if "id" not in item or item["id"] is None:
-                # Let database auto-increment
+                # Create new artifact
                 artifact = ArtifactModel(
                     name=item["name"],
                     type=item["type"],
                     description=item.get("description"),
-                    url=item.get("url")
+                    url=item.get("url"),
+                    readme=item.get("readme"),  # ✅ ADD
                 )
                 db.add(artifact)
                 db.commit()
                 db.refresh(artifact)
                 item["id"] = artifact.id
             else:
-                # Update existing
-                artifact = db.query(ArtifactModel).filter(ArtifactModel.id == item["id"]).first()
+            # Update existing artifact
+                artifact = (
+                    db.query(ArtifactModel)
+                    .filter(ArtifactModel.id == item["id"])
+                    .first()
+                )
                 if artifact:
                     artifact.name = item["name"]
                     artifact.type = item["type"]
                     artifact.description = item.get("description")
                     artifact.url = item.get("url")
+                    artifact.readme = item.get("readme")  # ✅ ADD
                     db.commit()
                 else:
                     artifact = ArtifactModel(
@@ -212,10 +160,12 @@ class LocalStore:
                         name=item["name"],
                         type=item["type"],
                         description=item.get("description"),
-                        url=item.get("url")
+                        url=item.get("url"),
+                        readme=item.get("readme"),  # ✅ ADD
                     )
                     db.add(artifact)
                     db.commit()
+
             return item
         finally:
             db.close()
@@ -231,7 +181,8 @@ class LocalStore:
                 "name": artifact.name,
                 "type": artifact.type,
                 "description": artifact.description,
-                "url": artifact.url
+                "url": artifact.url,
+                "readme": artifact.readme, 
             }
         finally:
             db.close()
@@ -331,6 +282,15 @@ if _using_dynamo():
 else:
     store = LocalStore()
     print("⚠️ LOCAL_MODE or no AWS config → using SQLite store")
+    
+def fetch_readme(url: str) -> str | None:
+    try:
+        r = requests.get(url, timeout=5)
+        if r.status_code == 200:
+            return r.text[:100_000]  # safety cap
+    except Exception:
+        pass
+    return None
 
 # ------------------- FASTAPI APP SETUP -------------------
 
@@ -456,16 +416,6 @@ try:
         api.include_router(admin_router, prefix="/auth")
     except Exception:
         logging.getLogger(__name__).warning("Auth routes not loaded")
-    try:
-        # import lineage models so their tables are created by init_db()
-        import bs.src.lineage.models  # noqa: F401
-    except Exception:
-        logging.getLogger(__name__).warning("Lineage models not loaded")
-    try:
-        from bs.src.lineage.routes import router as lineage_router
-        api.include_router(lineage_router)
-    except Exception:
-        logging.getLogger(__name__).warning("Lineage routes not loaded")
 except Exception as e:
     logging.getLogger(__name__).warning("Artifacts router not loaded: %s", e)
 @api.get("/")
@@ -743,76 +693,6 @@ def delete_user_account(username: str, authorization: str = Header(None)):
     return {"message": f"User {username} deleted successfully"}
 
 # ------------------- PHASE 2: ARTIFACT ENDPOINTS -------------------
-
-@app.post("/artifact/byRegEx", response_model=List[ArtifactMetadataOut])
-async def artifact_by_regex(
-    request: Request,
-    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
-):
-    """
-    BASELINE endpoint: search artifacts whose name or description matches a regex.
-    We must NOT return 422. All bad input -> 400 with BAD_ARTIFACT_REGEX_MSG.
-    No matches -> 404 with NO_ARTIFACT_FOR_REGEX_MSG.
-    """
-
-    # ---- 1) Read raw body ----
-    raw_body = await request.body()
-    logger.debug(f"[byRegEx] raw body={raw_body!r}")
-
-    if not raw_body.strip():
-        logger.debug("[byRegEx] empty body -> 400")
-        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
-
-    # ---- 2) Parse JSON manually ----
-    try:
-        body = json.loads(raw_body.decode("utf-8"))
-    except json.JSONDecodeError as e:
-        logger.debug(f"[byRegEx] JSON decode error: {e}")
-        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
-
-    if not isinstance(body, dict):
-        logger.debug(f"[byRegEx] body is not an object: {body!r}")
-        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
-
-    # Accept "regex" or "artifact_regex"
-    regex_value = body.get("regex") or body.get("artifact_regex")
-    logger.debug(f"[byRegEx] regex field={regex_value!r}")
-
-    if not isinstance(regex_value, str) or not regex_value:
-        logger.debug("[byRegEx] missing/empty regex field")
-        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
-
-    # ---- 3) Compile regex ----
-    try:
-        pattern = re.compile(regex_value)
-    except re.error as e:
-        logger.debug(f"[byRegEx] regex compile error: {e}")
-        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
-
-    # ---- 4) Search artifacts in store ----
-    artifacts = store.list_artifacts()
-    logger.debug(f"[byRegEx] searching {len(artifacts)} artifacts")
-
-    matches: list[ArtifactMetadataOut] = []
-    for a in artifacts:
-        name = a.get("name") or ""
-        desc = a.get("description") or ""
-        if pattern.search(name) or pattern.search(desc):
-            matches.append(
-                ArtifactMetadataOut(
-                    name=a["name"],
-                    id=str(a["id"]),
-                    type=ArtifactType(a["type"]),
-                )
-            )
-
-    if not matches:
-        logger.debug("[byRegEx] no matches -> 404")
-        raise HTTPException(status_code=404, detail=NO_ARTIFACT_FOR_REGEX_MSG)
-
-    logger.debug(f"[byRegEx] {len(matches)} matches found")
-    return matches
-
 @app.post("/artifact/{artifact_type}", response_model=ArtifactOut, status_code=201)
 def ingest_artifact_phase2(
     artifact_type: str,
@@ -825,12 +705,15 @@ def ingest_artifact_phase2(
     parsed = urllib.parse.urlparse(str(payload.url))
     name = parsed.path.rstrip("/").split("/")[-1] or "artifact"
 
+    readme = fetch_readme(str(payload.url))
+    
     item = {
         "id": None,  # store allocates numeric id
         "name": name,
         "type": artifact_type,
         "url": str(payload.url),
         "description": None,
+        "readme": readme,
         "created_at": time.time(),
     }
 
@@ -997,55 +880,42 @@ async def artifact_by_regex(
     request: Request,
     x_authorization: str | None = Header(default=None, alias="X-Authorization"),
 ):
-    """
-    BASELINE endpoint: search artifacts whose name or description matches a regex.
-    We must NOT return 422. All bad input -> 400 with BAD_ARTIFACT_REGEX_MSG.
-    No matches -> 404 with NO_ARTIFACT_FOR_REGEX_MSG.
-    """
-
     # ---- 1) Read raw body ----
     raw_body = await request.body()
     logger.debug(f"[byRegEx] raw body={raw_body!r}")
 
     if not raw_body.strip():
-        logger.debug("[byRegEx] empty body -> 400")
         raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
 
     # ---- 2) Parse JSON manually ----
     try:
         body = json.loads(raw_body.decode("utf-8"))
-    except json.JSONDecodeError as e:
-        logger.debug(f"[byRegEx] JSON decode error: {e}")
+    except json.JSONDecodeError:
         raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
 
     if not isinstance(body, dict):
-        logger.debug(f"[byRegEx] body is not an object: {body!r}")
         raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
 
-    # Accept "regex" or "artifact_regex"
     regex_value = body.get("regex") or body.get("artifact_regex")
-    logger.debug(f"[byRegEx] regex field={regex_value!r}")
-
     if not isinstance(regex_value, str) or not regex_value:
-        logger.debug("[byRegEx] missing/empty regex field")
         raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
 
     # ---- 3) Compile regex ----
     try:
         pattern = re.compile(regex_value)
-    except re.error as e:
-        logger.debug(f"[byRegEx] regex compile error: {e}")
+    except re.error:
         raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
 
     # ---- 4) Search artifacts in store ----
     artifacts = store.list_artifacts()
-    logger.debug(f"[byRegEx] searching {len(artifacts)} artifacts")
-
     matches: list[ArtifactMetadataOut] = []
+
     for a in artifacts:
         name = a.get("name") or ""
         desc = a.get("description") or ""
-        if pattern.search(name) or pattern.search(desc):
+        readme = a.get("readme") or ""   # ✅ ADD THIS
+
+        if pattern.search(name) or pattern.search(desc) or pattern.search(readme):  # ✅ ADD readme
             matches.append(
                 ArtifactMetadataOut(
                     name=a["name"],
@@ -1056,11 +926,10 @@ async def artifact_by_regex(
             )
 
     if not matches:
-        logger.debug("[byRegEx] no matches -> 404")
         raise HTTPException(status_code=404, detail=NO_ARTIFACT_FOR_REGEX_MSG)
 
-    logger.debug(f"[byRegEx] {len(matches)} matches found")
     return matches
+
 
 def _get_artifact_by_type_and_id(artifact_type: str, id: str) -> ArtifactOut:
     if artifact_type not in VALID_TYPES:
