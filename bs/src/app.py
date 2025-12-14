@@ -109,38 +109,104 @@ def _using_dynamo() -> bool:
 
 class LocalStore:
     """
-    Simple in-memory store for local/autograder.
+    SQLite-backed store that persists in Lambda's /tmp directory.
+    This ensures artifacts survive across requests to the same Lambda instance.
     """
     def __init__(self):
-        self.artifacts: Dict[int, Dict[str, Any]] = {}
+        # Initialize the database
+        init_db()
+        # Keep ratings in memory (could be moved to DB later)
         self.ratings: Dict[int, Dict[str, Any]] = {}
-        self._next_id = 1
 
     def clear_all(self):
-        self.artifacts.clear()
+        # Reset the SQL database
+        reset_db()
         self.ratings.clear()
-        self._next_id = 1
 
     def put_artifact(self, item: Dict[str, Any]) -> Dict[str, Any]:
-        # if item already has id, respect it; else allocate
-        if "id" not in item or item["id"] is None:
-            item["id"] = self._next_id
-            self._next_id += 1
-        aid = int(item["id"])
-        self.artifacts[aid] = item
-        return item
+        # Save to SQL database
+        db = SessionLocal()
+        try:
+            if "id" not in item or item["id"] is None:
+                # Let database auto-increment
+                artifact = ArtifactModel(
+                    name=item["name"],
+                    type=item["type"],
+                    description=item.get("description"),
+                    url=item.get("url")
+                )
+                db.add(artifact)
+                db.commit()
+                db.refresh(artifact)
+                item["id"] = artifact.id
+            else:
+                # Update existing
+                artifact = db.query(ArtifactModel).filter(ArtifactModel.id == item["id"]).first()
+                if artifact:
+                    artifact.name = item["name"]
+                    artifact.type = item["type"]
+                    artifact.description = item.get("description")
+                    artifact.url = item.get("url")
+                    db.commit()
+                else:
+                    artifact = ArtifactModel(
+                        id=item["id"],
+                        name=item["name"],
+                        type=item["type"],
+                        description=item.get("description"),
+                        url=item.get("url")
+                    )
+                    db.add(artifact)
+                    db.commit()
+            return item
+        finally:
+            db.close()
 
     def get_artifact(self, aid: int) -> Optional[Dict[str, Any]]:
-        return self.artifacts.get(aid)
+        db = SessionLocal()
+        try:
+            artifact = db.query(ArtifactModel).filter(ArtifactModel.id == aid).first()
+            if not artifact:
+                return None
+            return {
+                "id": artifact.id,
+                "name": artifact.name,
+                "type": artifact.type,
+                "description": artifact.description,
+                "url": artifact.url
+            }
+        finally:
+            db.close()
 
     def delete_artifact(self, aid: int) -> bool:
-        existed = aid in self.artifacts
-        self.artifacts.pop(aid, None)
-        self.ratings.pop(aid, None)
-        return existed
+        db = SessionLocal()
+        try:
+            artifact = db.query(ArtifactModel).filter(ArtifactModel.id == aid).first()
+            if artifact:
+                db.delete(artifact)
+                db.commit()
+                self.ratings.pop(aid, None)
+                return True
+            return False
+        finally:
+            db.close()
 
     def list_artifacts(self) -> List[Dict[str, Any]]:
-        return list(self.artifacts.values())
+        db = SessionLocal()
+        try:
+            artifacts = db.query(ArtifactModel).all()
+            return [
+                {
+                    "id": a.id,
+                    "name": a.name,
+                    "type": a.type,
+                    "description": a.description,
+                    "url": a.url
+                }
+                for a in artifacts
+            ]
+        finally:
+            db.close()
 
     def put_rating(self, aid: int, rating: Dict[str, Any]):
         self.ratings[aid] = rating
