@@ -19,6 +19,8 @@ import re
 from typing import Dict, Any, Optional, List
 import json
 import requests
+import threading
+from collections import defaultdict
 
 from pydantic import BaseModel
 from sqlalchemy.orm import Session
@@ -58,6 +60,7 @@ from bs.src.jwt_auth import (
 )
 
 # ------------------- CORS / ENV / HELPERS -------------------
+_rate_locks: dict[int, threading.Lock] = defaultdict(threading.Lock)
 
 origins = [
     "http://localhost:5173",
@@ -90,6 +93,53 @@ class ArtifactRegExIn(BaseModel):
     regex: str
 
 # ------------------- STORAGE ABSTRACTION -------------------
+def _compute_and_store_rating(aid: int, art: dict) -> dict:
+    # art must have url
+    url = art.get("url")
+    if not url:
+        raise HTTPException(status_code=424, detail="Rating pipeline error")
+
+    try:
+        res = _compute_one(str(url), "MODEL")
+    except Exception as e:
+        logger.exception(f"[rate] compute failed for id={aid}, url={url}: {e}")
+        raise HTTPException(status_code=424, detail="Rating pipeline error")
+
+    size_score_out = SizeScoreOut(**res.size_score)
+
+    rating_out = ModelRatingOut(
+        # FORCE name to match the artifact record
+        name=art["name"],
+        category=res.category,
+        net_score=res.net_score,
+        net_score_latency=int(res.net_score_latency),
+        ramp_up_time=res.ramp_up_time,
+        ramp_up_time_latency=int(res.ramp_up_time_latency),
+        bus_factor=res.bus_factor,
+        bus_factor_latency=int(res.bus_factor_latency),
+        performance_claims=res.performance_claims,
+        performance_claims_latency=int(res.performance_claims_latency),
+        license=res.license,
+        license_latency=int(res.license_latency),
+        dataset_and_code_score=res.dataset_and_code_score,
+        dataset_and_code_score_latency=int(res.dataset_and_code_score_latency),
+        dataset_quality=res.dataset_quality,
+        dataset_quality_latency=int(res.dataset_quality_latency),
+        code_quality=res.code_quality,
+        code_quality_latency=int(res.code_quality_latency),
+        reproducibility=res.reproducibility,
+        reproducibility_latency=int(res.reproducibility_latency),
+        reviewedness=res.reviewedness,
+        reviewedness_latency=int(res.reviewedness_latency),
+        tree_score=res.tree_score,
+        tree_score_latency=int(res.tree_score_latency),
+        size_score=size_score_out,
+        size_score_latency=int(res.size_score_latency),
+    )
+
+    rating_dict = rating_out.model_dump()
+    store.put_rating(aid, rating_dict)
+    return rating_dict
 
 def _using_dynamo() -> bool:
     """
@@ -837,7 +887,7 @@ def ingest_artifact_phase2(
 
         size_score_out = SizeScoreOut(**res.size_score)
         rating_out = ModelRatingOut(
-            name=res.name,
+            name=item["name"],
             category=res.category,
             net_score=res.net_score,
             net_score_latency=res.net_score_latency,
@@ -1051,17 +1101,27 @@ def rate_model_artifact(
         raise HTTPException(status_code=400, detail="Invalid artifact_id")
 
     try:
-        int_id = int(id)
+        aid = int(id)
     except ValueError:
         raise HTTPException(status_code=400, detail="Invalid artifact_id")
 
-    art = store.get_artifact(int_id)
+    art = store.get_artifact(aid)
     if art is None or art["type"] != "model":
         raise HTTPException(status_code=404, detail="Artifact does not exist")
 
-    rating = store.get_rating(int_id)
-    if rating is None:
-        # should not happen with sync ingest, but safe fallback
-        raise HTTPException(status_code=404, detail="Artifact does not exist")
+    # FAST PATH: cached rating exists
+    rating = store.get_rating(aid)
+    if rating is not None:
+        # also enforce name match in case old cached values were wrong
+        rating["name"] = art["name"]
+        return ModelRatingOut(**rating)
 
-    return ModelRatingOut(**rating)
+    # SLOW PATH: compute once with lock
+    lock = _rate_locks[aid]
+    with lock:
+        # double-check after acquiring lock
+        rating = store.get_rating(aid)
+        if rating is None:
+            rating = _compute_and_store_rating(aid, art)
+        rating["name"] = art["name"]
+        return ModelRatingOut(**rating)
