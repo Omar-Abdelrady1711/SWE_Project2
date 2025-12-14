@@ -9,22 +9,65 @@ Globals:
     MemorySize: 512
 
 Resources:
+  # DynamoDB Tables
+  ArtifactsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-Artifacts"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: id
+          AttributeType: N
+      KeySchema:
+        - AttributeName: id
+          KeyType: HASH
+
+  RatingsTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub "${AWS::StackName}-Ratings"
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: artifact_id
+          AttributeType: N
+      KeySchema:
+        - AttributeName: artifact_id
+          KeyType: HASH
+
   RegistryApi:
     Type: AWS::Serverless::Function
     Properties:
       Handler: bs.src.app.handler
       CodeUri: .
       Architectures: [x86_64]
+      Environment:
+        Variables:
+          ARTIFACTS_TABLE: !Ref ArtifactsTable
+          RATINGS_TABLE: !Ref RatingsTable
+          AWS_LAMBDA_EXEC: "true"
       Policies:
         - AWSLambdaBasicExecutionRole
+        - DynamoDBCrudPolicy:
+            TableName: !Ref ArtifactsTable
+        - DynamoDBCrudPolicy:
+            TableName: !Ref RatingsTable
       Events:
         ApiEvent:
           Type: Api
           Properties:
             Path: /{proxy+}
             Method: ANY
+    DependsOn:
+      - ArtifactsTable
+      - RatingsTable
 
 Outputs:
   ApiUrl:
     Description: Base URL for API Gateway stage
     Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod"
+  ArtifactsTableName:
+    Description: DynamoDB Artifacts Table
+    Value: !Ref ArtifactsTable
+  RatingsTableName:
+    Description: DynamoDB Ratings Table
+    Value: !Ref RatingsTable

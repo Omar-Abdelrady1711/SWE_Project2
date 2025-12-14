@@ -92,19 +92,19 @@ class ArtifactRegExIn(BaseModel):
 
 def _using_dynamo() -> bool:
     """
-    Use Dynamo ONLY if:
-      - LOCAL_MODE not enabled
-      - AWS creds exist
-      - DDB_TABLE exists
-    This prevents autograder/local runs from touching boto3.
+    Use DynamoDB if:
+      - LOCAL_MODE is NOT enabled
+      - Running in AWS Lambda (AWS_LAMBDA_EXEC env var set by template.yaml)
+      - OR ARTIFACTS_TABLE env var is set (manual config)
+    
+    Lambda gets credentials via IAM role, NOT via AWS_ACCESS_KEY_ID env vars.
     """
     if os.getenv("LOCAL_MODE", "").lower() in {"1", "true", "yes"}:
         return False
+    
+    # Check if we're in Lambda (set by template.yaml) or have table configured
     return bool(
-        os.getenv("AWS_ACCESS_KEY_ID")
-        and os.getenv("AWS_SECRET_ACCESS_KEY")
-        and os.getenv("DDB_TABLE")
-        and os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", ""))
+        os.getenv("AWS_LAMBDA_EXEC") or os.getenv("ARTIFACTS_TABLE")
     )
 
 class LocalStore:
@@ -216,31 +216,37 @@ class LocalStore:
 
 class DynamoStore:
     """
-    Wrapper around your dynamo_store.py functions.
-    Import boto3 only inside here so LocalStore runs don't need it.
+    DynamoDB-backed store for artifacts and ratings.
+    Uses lazy initialization in dynamo_store.py to prevent import-time crashes.
     """
     def __init__(self):
+        # Import lazily to avoid boto3 issues in local/autograder
         from bs.src.dynamo_store import (
             put_artifact as _put,
             get_artifact_by_id as _get,
-            scan_all_items as _scan_all,
-            delete_artifact_by_id as _del,
-            clear_all_items as _clear_all,
+            scan_all as _scan_all,
+            delete_artifact as _del,
+            reset_all as _reset_all,
             put_rating as _put_rating,
-            get_rating_by_id as _get_rating,
+            get_rating as _get_rating,
+            get_next_id as _get_next_id,
         )
         self._put = _put
         self._get = _get
         self._scan_all = _scan_all
         self._del = _del
-        self._clear_all = _clear_all
+        self._reset_all = _reset_all
         self._put_rating = _put_rating
         self._get_rating = _get_rating
+        self._get_next_id = _get_next_id
 
     def clear_all(self):
-        self._clear_all()
+        self._reset_all()
 
     def put_artifact(self, item: Dict[str, Any]) -> Dict[str, Any]:
+        # Allocate ID if needed
+        if "id" not in item or item["id"] is None:
+            item["id"] = self._get_next_id()
         self._put(item)
         return item
 
@@ -251,7 +257,8 @@ class DynamoStore:
         return self._del(aid)
 
     def list_artifacts(self) -> List[Dict[str, Any]]:
-        return self._scan_all()
+        # Filter out the counter record (id=0)
+        return [a for a in self._scan_all() if a.get("id", 0) != 0]
 
     def put_rating(self, aid: int, rating: Dict[str, Any]):
         self._put_rating(aid, rating)
@@ -265,7 +272,7 @@ if _using_dynamo():
     print("✅ Using DynamoDB store")
 else:
     store = LocalStore()
-    print("⚠️ LOCAL_MODE or missing AWS config → using in-memory fake DB")
+    print("⚠️ LOCAL_MODE or no AWS config → using SQLite store")
 
 # ------------------- FASTAPI APP SETUP -------------------
 
