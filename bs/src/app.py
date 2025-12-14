@@ -90,39 +90,123 @@ class ArtifactRegExIn(BaseModel):
 
 # ------------------- STORAGE ABSTRACTION -------------------
 
+def _using_dynamo() -> bool:
+    """
+    Use Dynamo ONLY if:
+      - LOCAL_MODE not enabled
+      - AWS creds exist
+      - DDB_TABLE exists
+    This prevents autograder/local runs from touching boto3.
+    """
+    if os.getenv("LOCAL_MODE", "").lower() in {"1", "true", "yes"}:
+        return False
+    return bool(
+        os.getenv("AWS_ACCESS_KEY_ID")
+        and os.getenv("AWS_SECRET_ACCESS_KEY")
+        and os.getenv("DDB_TABLE")
+        and os.getenv("AWS_REGION", os.getenv("AWS_DEFAULT_REGION", ""))
+    )
+
 class LocalStore:
     """
-    Simple in-memory store for artifacts and ratings.
+    SQLite-backed store that persists in Lambda's /tmp directory.
+    This ensures artifacts survive across requests to the same Lambda instance.
     """
     def __init__(self):
-        self.artifacts: Dict[int, Dict[str, Any]] = {}
+        # Initialize the database
+        init_db()
+        # Keep ratings in memory (could be moved to DB later)
         self.ratings: Dict[int, Dict[str, Any]] = {}
-        self._next_id = 1
 
     def clear_all(self):
-        self.artifacts.clear()
+        # Reset the SQL database
+        reset_db()
         self.ratings.clear()
-        self._next_id = 1
 
     def put_artifact(self, item: Dict[str, Any]) -> Dict[str, Any]:
-        if "id" not in item or item["id"] is None:
-            item["id"] = self._next_id
-            self._next_id += 1
-        aid = int(item["id"])
-        self.artifacts[aid] = item
-        return item
+        # Save to SQL database
+        db = SessionLocal()
+        try:
+            if "id" not in item or item["id"] is None:
+                # Let database auto-increment
+                artifact = ArtifactModel(
+                    name=item["name"],
+                    type=item["type"],
+                    description=item.get("description"),
+                    url=item.get("url")
+                )
+                db.add(artifact)
+                db.commit()
+                db.refresh(artifact)
+                item["id"] = artifact.id
+            else:
+                # Update existing
+                artifact = db.query(ArtifactModel).filter(ArtifactModel.id == item["id"]).first()
+                if artifact:
+                    artifact.name = item["name"]
+                    artifact.type = item["type"]
+                    artifact.description = item.get("description")
+                    artifact.url = item.get("url")
+                    db.commit()
+                else:
+                    artifact = ArtifactModel(
+                        id=item["id"],
+                        name=item["name"],
+                        type=item["type"],
+                        description=item.get("description"),
+                        url=item.get("url")
+                    )
+                    db.add(artifact)
+                    db.commit()
+            return item
+        finally:
+            db.close()
 
     def get_artifact(self, aid: int) -> Optional[Dict[str, Any]]:
-        return self.artifacts.get(aid)
+        db = SessionLocal()
+        try:
+            artifact = db.query(ArtifactModel).filter(ArtifactModel.id == aid).first()
+            if not artifact:
+                return None
+            return {
+                "id": artifact.id,
+                "name": artifact.name,
+                "type": artifact.type,
+                "description": artifact.description,
+                "url": artifact.url
+            }
+        finally:
+            db.close()
 
     def delete_artifact(self, aid: int) -> bool:
-        existed = aid in self.artifacts
-        self.artifacts.pop(aid, None)
-        self.ratings.pop(aid, None)
-        return existed
+        db = SessionLocal()
+        try:
+            artifact = db.query(ArtifactModel).filter(ArtifactModel.id == aid).first()
+            if artifact:
+                db.delete(artifact)
+                db.commit()
+                self.ratings.pop(aid, None)
+                return True
+            return False
+        finally:
+            db.close()
 
     def list_artifacts(self) -> List[Dict[str, Any]]:
-        return list(self.artifacts.values())
+        db = SessionLocal()
+        try:
+            artifacts = db.query(ArtifactModel).all()
+            return [
+                {
+                    "id": a.id,
+                    "name": a.name,
+                    "type": a.type,
+                    "description": a.description,
+                    "url": a.url
+                }
+                for a in artifacts
+            ]
+        finally:
+            db.close()
 
     def put_rating(self, aid: int, rating: Dict[str, Any]):
         self.ratings[aid] = rating
@@ -130,8 +214,58 @@ class LocalStore:
     def get_rating(self, aid: int) -> Optional[Dict[str, Any]]:
         return self.ratings.get(aid)
 
-# Initialize store
-store = LocalStore()
+class DynamoStore:
+    """
+    Wrapper around your dynamo_store.py functions.
+    Import boto3 only inside here so LocalStore runs don't need it.
+    """
+    def __init__(self):
+        from bs.src.dynamo_store import (
+            put_artifact as _put,
+            get_artifact_by_id as _get,
+            scan_all_items as _scan_all,
+            delete_artifact_by_id as _del,
+            clear_all_items as _clear_all,
+            put_rating as _put_rating,
+            get_rating_by_id as _get_rating,
+        )
+        self._put = _put
+        self._get = _get
+        self._scan_all = _scan_all
+        self._del = _del
+        self._clear_all = _clear_all
+        self._put_rating = _put_rating
+        self._get_rating = _get_rating
+
+    def clear_all(self):
+        self._clear_all()
+
+    def put_artifact(self, item: Dict[str, Any]) -> Dict[str, Any]:
+        self._put(item)
+        return item
+
+    def get_artifact(self, aid: int) -> Optional[Dict[str, Any]]:
+        return self._get(aid)
+
+    def delete_artifact(self, aid: int) -> bool:
+        return self._del(aid)
+
+    def list_artifacts(self) -> List[Dict[str, Any]]:
+        return self._scan_all()
+
+    def put_rating(self, aid: int, rating: Dict[str, Any]):
+        self._put_rating(aid, rating)
+
+    def get_rating(self, aid: int) -> Optional[Dict[str, Any]]:
+        return self._get_rating(aid)
+
+# choose backend
+if _using_dynamo():
+    store = DynamoStore()
+    print("✅ Using DynamoDB store")
+else:
+    store = LocalStore()
+    print("⚠️ LOCAL_MODE or missing AWS config → using in-memory fake DB")
 
 # ------------------- FASTAPI APP SETUP -------------------
 
