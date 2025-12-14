@@ -95,118 +95,39 @@ class ArtifactRegExIn(BaseModel):
 
 class LocalStore:
     """
-    SQLite-backed store that persists in Lambda's /tmp directory.
-    This ensures artifacts survive across requests to the same Lambda instance.
+    Simple in-memory store for autograder and Lambda.
+    Note: In Lambda, state only persists within a single instance's lifetime.
     """
     def __init__(self):
-        # Keep ratings in memory (could be moved to DB later)
+        self.artifacts: Dict[int, Dict[str, Any]] = {}
         self.ratings: Dict[int, Dict[str, Any]] = {}
-        self._db_initialized = False
-
-    def _ensure_db(self):
-        """Lazy database initialization to avoid issues at import time."""
-        if not self._db_initialized:
-            try:
-                init_db()
-                self._db_initialized = True
-            except Exception as e:
-                print(f"⚠️ Database initialization failed: {e}")
-                # Continue anyway - will fail later if DB is actually needed
+        self._next_id = 1
 
     def clear_all(self):
-        # Reset the SQL database
-        self._ensure_db()
-        reset_db()
+        self.artifacts.clear()
         self.ratings.clear()
+        self._next_id = 1
 
     def put_artifact(self, item: Dict[str, Any]) -> Dict[str, Any]:
-        # Save to SQL database
-        self._ensure_db()
-        db = SessionLocal()
-        try:
-            if "id" not in item or item["id"] is None:
-                # Let database auto-increment
-                artifact = ArtifactModel(
-                    name=item["name"],
-                    type=item["type"],
-                    description=item.get("description"),
-                    url=item.get("url")
-                )
-                db.add(artifact)
-                db.commit()
-                db.refresh(artifact)
-                item["id"] = artifact.id
-            else:
-                # Update existing
-                artifact = db.query(ArtifactModel).filter(ArtifactModel.id == item["id"]).first()
-                if artifact:
-                    artifact.name = item["name"]
-                    artifact.type = item["type"]
-                    artifact.description = item.get("description")
-                    artifact.url = item.get("url")
-                    db.commit()
-                else:
-                    artifact = ArtifactModel(
-                        id=item["id"],
-                        name=item["name"],
-                        type=item["type"],
-                        description=item.get("description"),
-                        url=item.get("url")
-                    )
-                    db.add(artifact)
-                    db.commit()
-            return item
-        finally:
-            db.close()
+        # if item already has id, respect it; else allocate
+        if "id" not in item or item["id"] is None:
+            item["id"] = self._next_id
+            self._next_id += 1
+        aid = int(item["id"])
+        self.artifacts[aid] = item
+        return item
 
     def get_artifact(self, aid: int) -> Optional[Dict[str, Any]]:
-        self._ensure_db()
-        db = SessionLocal()
-        try:
-            artifact = db.query(ArtifactModel).filter(ArtifactModel.id == aid).first()
-            if not artifact:
-                return None
-            return {
-                "id": artifact.id,
-                "name": artifact.name,
-                "type": artifact.type,
-                "description": artifact.description,
-                "url": artifact.url
-            }
-        finally:
-            db.close()
+        return self.artifacts.get(aid)
 
     def delete_artifact(self, aid: int) -> bool:
-        self._ensure_db()
-        db = SessionLocal()
-        try:
-            artifact = db.query(ArtifactModel).filter(ArtifactModel.id == aid).first()
-            if artifact:
-                db.delete(artifact)
-                db.commit()
-                self.ratings.pop(aid, None)
-                return True
-            return False
-        finally:
-            db.close()
+        existed = aid in self.artifacts
+        self.artifacts.pop(aid, None)
+        self.ratings.pop(aid, None)
+        return existed
 
     def list_artifacts(self) -> List[Dict[str, Any]]:
-        self._ensure_db()
-        db = SessionLocal()
-        try:
-            artifacts = db.query(ArtifactModel).all()
-            return [
-                {
-                    "id": a.id,
-                    "name": a.name,
-                    "type": a.type,
-                    "description": a.description,
-                    "url": a.url
-                }
-                for a in artifacts
-            ]
-        finally:
-            db.close()
+        return list(self.artifacts.values())
 
     def put_rating(self, aid: int, rating: Dict[str, Any]):
         self.ratings[aid] = rating
@@ -214,7 +135,7 @@ class LocalStore:
     def get_rating(self, aid: int) -> Optional[Dict[str, Any]]:
         return self.ratings.get(aid)
 
-# Use LocalStore with SQLite persistence
+# Use simple in-memory store
 store = LocalStore()
 
 # ------------------- FASTAPI APP SETUP -------------------
