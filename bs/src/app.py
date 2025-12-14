@@ -335,28 +335,21 @@ else:
     print("⚠️ LOCAL_MODE or no AWS config → using SQLite store")
     
 def fetch_readme(url: str) -> str | None:
-    candidates: list[str] = []
-
     u = (url or "").strip()
     if not u:
         return None
 
-    # 0) If they already gave a raw file URL, try it directly first
-    candidates.append(u)
-
-    # Helper: build base (strip query/fragment)
     base = u.split("#", 1)[0].split("?", 1)[0].rstrip("/")
 
-    # 1) HuggingFace repo page -> try resolve + raw, main + master, md + rst
-    if "huggingface.co" in base and "/resolve/" not in base and "/raw/" not in base:
+    candidates: list[str] = []
+
+    def add_hf_candidates(repo_base: str):
         for branch in ("main", "master"):
             for fname in ("README.md", "README.rst", "readme.md", "readme.rst"):
-                candidates.append(f"{base}/resolve/{branch}/{fname}")
-                candidates.append(f"{base}/raw/{branch}/{fname}")  # keep your old style too
+                candidates.append(f"{repo_base}/resolve/{branch}/{fname}")
 
-    # 2) GitHub repo page -> try raw README on main + master, md + rst (and lowercase)
-    if "github.com" in base and "raw.githubusercontent.com" not in base:
-        parts = base.replace("https://github.com/", "").strip("/").split("/")
+    def add_gh_candidates(repo_base: str):
+        parts = repo_base.replace("https://github.com/", "").strip("/").split("/")
         if len(parts) >= 2:
             owner, repo = parts[0], parts[1]
             for branch in ("main", "master"):
@@ -365,18 +358,44 @@ def fetch_readme(url: str) -> str | None:
                         f"https://raw.githubusercontent.com/{owner}/{repo}/{branch}/{fname}"
                     )
 
-    # 3) Try all candidates
+    # If the given URL already points to a likely README file, try it first
+    looks_like_readme_file = any(
+        base.lower().endswith(sfx) for sfx in ("/readme.md", "/readme.rst", "readme.md", "readme.rst")
+    )
+    if looks_like_readme_file:
+        candidates.append(base)
+
+    # HuggingFace repo page
+    if "huggingface.co" in base and "/resolve/" not in base:
+        add_hf_candidates(base)
+
+    # GitHub repo page
+    if "github.com" in base and "raw.githubusercontent.com" not in base:
+        add_gh_candidates(base)
+
+    # As a LAST resort, try the original URL (might be HTML)
+    candidates.append(base)
+
     for c in candidates:
         try:
-            r = requests.get(c, timeout=5, headers={"User-Agent": "ece461-autograder"})
-            if r.status_code == 200 and r.text:
-                return r.text[:100_000]  # safety cap
+            r = requests.get(c, timeout=8, headers={"User-Agent": "ece461-autograder"})
+            if r.status_code != 200 or not r.text:
+                continue
+
+            # Avoid saving HTML pages as README by mistake
+            ct = (r.headers.get("content-type") or "").lower()
+            if "text/html" in ct and ("resolve/" in c or "raw.githubusercontent.com" in c):
+                # shouldn't happen, but keep safe
+                continue
+            if "text/html" in ct and not looks_like_readme_file:
+                # If it's HTML and we weren't explicitly fetching a README file, skip it
+                continue
+
+            return r.text[:100_000]
         except Exception:
-            pass
+            continue
 
     return None
-
-
 
 from urllib.parse import urlparse
 
@@ -887,6 +906,7 @@ def ingest_artifact_phase2(
     name = name_from_url(str(payload.url))
 
     readme = fetch_readme(str(payload.url))
+    logger.info(f"[fetch_readme] url={payload.url} readme_len={(len(readme) if readme else 0)}")
     
     item = {
         "id": None,  # store allocates numeric id
