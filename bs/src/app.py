@@ -714,7 +714,36 @@ async def artifact_by_regex(
         logger.debug("[byRegEx] missing/empty regex field")
         raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
 
-    # ---- 3) Compile regex ----
+    # ---- 3) Safe-regex validation + compile ----
+    # Guard against catastrophic backtracking patterns; keep rules simple + fast.
+    # Heuristics:
+    #  - limit length
+    #  - forbid nested groups with overlapping quantifiers like (.+)+ or (.*)+
+    #  - forbid catastrophic constructs like (a+)+, (a*)+
+    #  - limit number of groups
+    MAX_REGEX_LEN = 512
+    if len(regex_value) > MAX_REGEX_LEN:
+        logger.debug("[byRegEx] regex too long")
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
+
+    # Simple heuristic patterns to block common DoS regexes
+    forbidden_subpatterns = [
+        r"\(.*\+\)\+",   # nested one-or-more quantifiers, e.g., (.+)+
+        r"\(.*\*\)\+",   # (.*)+
+        r"\(.*\+\)\*",   # (.+)*
+        r"\(.*\*\)\*",   # (.*)*
+    ]
+    for fp in forbidden_subpatterns:
+        if re.search(fp, regex_value):
+            logger.debug(f"[byRegEx] regex contains forbidden subpattern: {fp}")
+            raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
+
+    # Limit number of capture groups
+    group_count = regex_value.count("(") - regex_value.count("\(")
+    if group_count > 64:
+        logger.debug("[byRegEx] too many groups")
+        raise HTTPException(status_code=400, detail=BAD_ARTIFACT_REGEX_MSG)
+
     try:
         pattern = re.compile(regex_value)
     except re.error as e:
