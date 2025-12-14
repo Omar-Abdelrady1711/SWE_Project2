@@ -285,12 +285,29 @@ else:
     
 def fetch_readme(url: str) -> str | None:
     try:
-        r = requests.get(url, timeout=5)
-        if r.status_code == 200:
-            return r.text[:100_000]  # safety cap
+        if "huggingface.co" in url:
+            return requests.get(url + "/raw/main/README.md", timeout=5).text
+        if "github.com" in url:
+            parts = url.replace("https://github.com/", "").split("/")
+            return requests.get(
+                f"https://raw.githubusercontent.com/{parts[0]}/{parts[1]}/main/README.md",
+                timeout=5
+            ).text
     except Exception:
-        pass
-    return None
+        return None
+
+from urllib.parse import urlparse
+
+def name_from_url(url: str) -> str:
+    p = urlparse(url)
+    parts = [x for x in p.path.split("/") if x]
+
+    # Hugging Face: /org/repo → org-repo
+    if "huggingface.co" in p.netloc and len(parts) >= 2:
+        return f"{parts[-2]}-{parts[-1]}"
+
+    # default
+    return parts[-1] if parts else "artifact"
 
 # ------------------- FASTAPI APP SETUP -------------------
 
@@ -757,8 +774,7 @@ def ingest_artifact_phase2(
     if artifact_type not in VALID_TYPES:
         raise HTTPException(status_code=400, detail="Invalid artifact_type")
 
-    parsed = urllib.parse.urlparse(str(payload.url))
-    name = parsed.path.rstrip("/").split("/")[-1] or "artifact"
+    name = name_from_url(str(payload.url))
 
     readme = fetch_readme(str(payload.url))
     
