@@ -99,18 +99,29 @@ class LocalStore:
     This ensures artifacts survive across requests to the same Lambda instance.
     """
     def __init__(self):
-        # Initialize the database
-        init_db()
         # Keep ratings in memory (could be moved to DB later)
         self.ratings: Dict[int, Dict[str, Any]] = {}
+        self._db_initialized = False
+
+    def _ensure_db(self):
+        """Lazy database initialization to avoid issues at import time."""
+        if not self._db_initialized:
+            try:
+                init_db()
+                self._db_initialized = True
+            except Exception as e:
+                print(f"⚠️ Database initialization failed: {e}")
+                # Continue anyway - will fail later if DB is actually needed
 
     def clear_all(self):
         # Reset the SQL database
+        self._ensure_db()
         reset_db()
         self.ratings.clear()
 
     def put_artifact(self, item: Dict[str, Any]) -> Dict[str, Any]:
         # Save to SQL database
+        self._ensure_db()
         db = SessionLocal()
         try:
             if "id" not in item or item["id"] is None:
@@ -149,6 +160,7 @@ class LocalStore:
             db.close()
 
     def get_artifact(self, aid: int) -> Optional[Dict[str, Any]]:
+        self._ensure_db()
         db = SessionLocal()
         try:
             artifact = db.query(ArtifactModel).filter(ArtifactModel.id == aid).first()
@@ -165,6 +177,7 @@ class LocalStore:
             db.close()
 
     def delete_artifact(self, aid: int) -> bool:
+        self._ensure_db()
         db = SessionLocal()
         try:
             artifact = db.query(ArtifactModel).filter(ArtifactModel.id == aid).first()
@@ -178,6 +191,7 @@ class LocalStore:
             db.close()
 
     def list_artifacts(self) -> List[Dict[str, Any]]:
+        self._ensure_db()
         db = SessionLocal()
         try:
             artifacts = db.query(ArtifactModel).all()
