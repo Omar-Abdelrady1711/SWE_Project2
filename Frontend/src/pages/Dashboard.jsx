@@ -199,7 +199,7 @@ export default function Dashboard() {
         </div>
       </header>
 
-      <main className="dashboard-main" role="main" aria-labelledby="dashboard-title">
+      <main id="main-content" className="dashboard-main" role="main" aria-labelledby="dashboard-title">
         {/* Health Metrics Panel */}
         {health && (
           <section className="metrics-panel" aria-labelledby="metrics-title">

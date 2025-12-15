@@ -8,9 +8,15 @@ import ProtectedRoute from "./components/ProtectedRoute.jsx";
 
 export default function App() {
   return (
-    <Routes>
-      <Route path="/login" element={<Login />} />
-      <Route path="/test" element={<TestDebug />} />
+    <>
+      {/* Skip link for keyboard navigation */}
+      <a href="#main-content" className="skip-link">
+        Skip to main content
+      </a>
+      
+      <Routes>
+        <Route path="/login" element={<Login />} />
+        <Route path="/test" element={<TestDebug />} />
       
       <Route
         path="/dashboard"
@@ -40,6 +46,7 @@ export default function App() {
       />
       
       <Route path="/" element={<Navigate to="/login" replace />} />
-    </Routes>
+      </Routes>
+    </>
   );
 }
