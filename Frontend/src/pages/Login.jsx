@@ -49,30 +49,31 @@ export default function Login() {
   return (
     <main id="main-content" className="container" role="main" aria-labelledby="login-title">
       <h1 id="login-title">Welcome back</h1>
-      <p className="p-muted">Sign in to ACME Trustworthy Register</p>
+      <p className="p-muted">Sign in to ACME Trustworthy Registry</p>
 
       {/* Development credentials info */}
       <div 
         style={{
           padding: "1rem",
           backgroundColor: "#1e3a5f",
-          border: "1px solid #3d5a80",
+          border: "2px solid #60a5fa",
           borderRadius: "8px",
           marginBottom: "1.5rem",
-          fontSize: "0.875rem",
-          color: "#e0e7ef",
+          fontSize: "1rem",
+          color: "#ffffff",
         }}
         role="note"
         aria-label="Test credentials for development"
       >
-        <strong style={{ color: "#8fb3ff" }}>Test Credentials:</strong>
-        <ul style={{ margin: "0.5rem 0 0 1.5rem", paddingLeft: 0 }}>
-          <li>Admin: <code style={{ backgroundColor: "#2d4a6f", padding: "2px 6px", borderRadius: "4px" }}>admin</code> / <code style={{ backgroundColor: "#2d4a6f", padding: "2px 6px", borderRadius: "4px" }}>admin123</code></li>
-          <li>User: <code style={{ backgroundColor: "#2d4a6f", padding: "2px 6px", borderRadius: "4px" }}>user</code> / <code style={{ backgroundColor: "#2d4a6f", padding: "2px 6px", borderRadius: "4px" }}>user123</code></li>
+        <strong style={{ color: "#93c5fd" }}>Test Credentials:</strong>
+        <ul style={{ margin: "0.5rem 0 0 0", paddingLeft: "1.5rem" }}>
+          <li style={{ marginBottom: "0.25rem" }}>Admin: <code style={{ backgroundColor: "#374151", padding: "2px 8px", borderRadius: "4px", color: "#ffffff" }}>admin</code> / <code style={{ backgroundColor: "#374151", padding: "2px 8px", borderRadius: "4px", color: "#ffffff" }}>admin123</code></li>
+          <li>User: <code style={{ backgroundColor: "#374151", padding: "2px 8px", borderRadius: "4px", color: "#ffffff" }}>user</code> / <code style={{ backgroundColor: "#374151", padding: "2px 8px", borderRadius: "4px", color: "#ffffff" }}>user123</code></li>
         </ul>
       </div>
 
-      <form onSubmit={onSubmit} noValidate>
+      <form onSubmit={onSubmit} noValidate aria-describedby="form-instructions">
+        <p id="form-instructions" className="sr-only">Enter your username and password to sign in.</p>
         <InputField
           id="username"
           label="Username"
@@ -106,9 +107,9 @@ export default function Login() {
             </div>
           )}
 
-          <div className="helper">
-            Don’t have an account? <a href="#" aria-disabled="true">Ask an admin</a>
-          </div>
+          <p className="helper">
+            Don't have an account? Contact your administrator to request access.
+          </p>
         </div>
       </form>
     </main>

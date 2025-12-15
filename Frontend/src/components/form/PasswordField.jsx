@@ -30,7 +30,7 @@ export default function PasswordField({
           aria-describedby={describedBy}
           required={required}
           autoComplete={autoComplete}
-          style={{ paddingRight: 44 }}
+          style={{ paddingRight: 52 }}
         />
         <button
           type="button"
@@ -39,18 +39,23 @@ export default function PasswordField({
           aria-label={visible ? "Hide password" : "Show password"}
           style={{
             position: "absolute",
-            right: 6,
-            top: 6,
-            height: 32,
-            minWidth: 32,
-            borderRadius: 8,
-            border: "1px solid #2a3347",
-            background: "#0f1320",
-            color: "#e7ebf3",
-            cursor: "pointer"
+            right: 8,
+            top: "50%",
+            transform: "translateY(-50%)",
+            height: 36,
+            minWidth: 36,
+            borderRadius: 6,
+            border: "2px solid #4b5563",
+            background: "#374151",
+            color: "#ffffff",
+            cursor: "pointer",
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            fontSize: "1rem",
           }}
         >
-          {visible ? "🙈" : "👁️"}
+          <span aria-hidden="true">{visible ? "🙈" : "👁️"}</span>
         </button>
       </div>
       {error && (

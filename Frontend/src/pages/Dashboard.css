@@ -59,8 +59,9 @@
   display: flex;
   align-items: center;
   gap: 0.5rem;
-  color: #495057;
+  color: #374151;
   font-size: 0.95rem;
+  font-weight: 500;
 }
 
 .user-icon {
@@ -121,8 +122,8 @@
 
 .metric-label {
   font-size: 0.875rem;
-  color: #6c757d;
-  font-weight: 500;
+  color: #4b5563;
+  font-weight: 600;
   margin-bottom: 0.25rem;
 }
 
@@ -136,8 +137,8 @@
 .metric-sublabel {
   display: block;
   font-size: 0.75rem;
-  color: #6c757d;
-  font-weight: 400;
+  color: #4b5563;
+  font-weight: 500;
   margin-top: 0.25rem;
 }
 
@@ -184,8 +185,9 @@
   align-items: center;
   gap: 0.5rem;
   font-size: 0.9rem;
-  color: #495057;
+  color: #374151;
   cursor: pointer;
+  font-weight: 500;
 }
 
 .search-mode input[type="radio"] {
@@ -317,15 +319,15 @@
 
 .artifacts-count {
   font-size: 1.25rem;
-  color: #6c757d;
-  font-weight: 400;
+  color: #4b5563;
+  font-weight: 500;
 }
 
 /* Loading State */
 .loading-state {
   text-align: center;
   padding: 4rem 2rem;
-  color: #6c757d;
+  color: #374151;
 }
 
 .spinner {
@@ -358,9 +360,9 @@
 .empty-state {
   text-align: center;
   padding: 4rem 2rem;
-  color: #6c757d;
+  color: #374151;
   background-color: #fff;
-  border: 2px dashed #dee2e6;
+  border: 2px dashed #9ca3af;
   border-radius: 8px;
 }
 
@@ -439,7 +441,7 @@
 
 .artifact-id {
   font-size: 0.875rem;
-  color: #6c757d;
+  color: #4b5563;
   font-family: monospace;
 }
 

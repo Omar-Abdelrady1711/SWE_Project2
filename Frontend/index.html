@@ -7,8 +7,32 @@
     <meta name="description" content="ACME Trustworthy Model Registry - Manage and discover AI models, datasets, and code artifacts" />
     <meta name="theme-color" content="#0b0d12" />
     <title>ACME Model Registry</title>
+    <style>
+      /* Critical CSS for accessibility - ensure focus is always visible */
+      :focus-visible {
+        outline: 3px solid #6b9bff !important;
+        outline-offset: 2px !important;
+      }
+      /* Ensure minimum touch targets */
+      button, a, input, select, textarea {
+        min-height: 44px;
+      }
+      /* Prefers reduced motion */
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
+          scroll-behavior: auto !important;
+        }
+      }
+    </style>
   </head>
   <body>
+    <noscript>
+      <h1>JavaScript Required</h1>
+      <p>This application requires JavaScript to function. Please enable JavaScript in your browser settings.</p>
+    </noscript>
     <div id="root"></div>
     <script type="module" src="/src/main.jsx"></script>
   </body>
