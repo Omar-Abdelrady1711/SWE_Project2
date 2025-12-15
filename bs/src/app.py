@@ -66,6 +66,7 @@ _rate_locks: dict[int, threading.Lock] = defaultdict(threading.Lock)
 origins = [
     "http://localhost:5173",
     "https://z7rple5yzi.execute-api.us-east-1.amazonaws.com",
+    "https://swe-project2.vercel.app",
 ]
 
 STAGE = os.getenv("API_GATEWAY_BASE_PATH", "/Prod")
