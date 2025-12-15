@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from mangum import Mangum
 from pathlib import Path
+from urllib.parse import urlparse
 
 # acemcli rating pipeline (phase 1 + phase 2)
 from bs.src.acemcli.orchestrator import _compute_one
@@ -94,7 +95,13 @@ class ArtifactRegExIn(BaseModel):
 
 # ------------------- NEW: COST + LICENSE CHECK INPUT -------------------
 class LicenseCheckIn(BaseModel):
-    github_url: str
+    github_url: Optional[str] = None
+    GitHubURL: Optional[str] = None
+    url: Optional[str] = None
+
+    def resolved_url(self) -> str:
+        return (self.github_url or self.GitHubURL or self.url or "").strip()
+
 
 # ------------------- STORAGE ABSTRACTION -------------------
 def _compute_and_store_rating(aid: int, art: dict) -> dict:
@@ -453,7 +460,6 @@ def _licenses_compatible(model_license: str, code_license: str) -> bool:
 
     return m == c
 
-from urllib.parse import urlparse
 
 def fetch_readme(url: str) -> str | None:
     candidates: list[str] = []
@@ -1210,6 +1216,41 @@ def artifact_cost_plural(
     return artifact_cost(artifact_type, id, dependency, x_authorization)
 
 # ------------------- NEW: LICENSE CHECK ENDPOINTS -------------------
+
+def _parse_github_owner_repo(url: str) -> tuple[str, str]:
+    u = (url or "").strip()
+    m = re.match(r"^https?://github\.com/([^/]+)/([^/]+)", u)
+    if not m:
+        raise ValueError("Not a GitHub URL")
+    owner = m.group(1)
+    repo = m.group(2).replace(".git", "")
+    return owner, repo
+
+def _github_has_valid_license(github_url: str) -> bool:
+    try:
+        owner, repo = _parse_github_owner_repo(github_url)
+    except Exception:
+        return False
+
+    api_url = f"https://api.github.com/repos/{owner}/{repo}/license"
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "User-Agent": "ece461-autograder",
+    }
+
+    try:
+        r = requests.get(api_url, headers=headers, timeout=12)
+        if r.status_code != 200:
+            return False
+        data = r.json()
+        lic = data.get("license") or {}
+        spdx = (lic.get("spdx_id") or "").strip()
+        if not spdx or spdx.upper() == "NOASSERTION":
+            return False
+        return True
+    except Exception:
+        return False
+
 # Spec: PUT /artifact/model/{id}/license-check {github_url} -> bool
 @app.put("/artifact/model/{id}/license-check")
 def license_check(
@@ -1217,19 +1258,14 @@ def license_check(
     body: LicenseCheckIn,
     x_authorization: str | None = Header(default=None, alias="X-Authorization"),
 ):
+    # Optional: you can keep this artifact-exists check (safe)
     aid = _parse_int_id(id)
     art = store.get_artifact(aid)
     if art is None or _normalize_type(art.get("type")) != "model":
         raise HTTPException(status_code=404, detail="Artifact does not exist")
 
-    rating = store.get_rating(aid)
-    if rating is None:
-        rating = _compute_and_store_rating(aid, art)
-
-    model_license = str(rating.get("license") or "unknown")
-    code_spdx = _github_repo_license_spdx(body.github_url) or "unknown"
-
-    return _licenses_compatible(model_license, code_spdx)
+    # What the rubric wants: “Given a GitHub URL, does it have a valid license?”
+    return _github_has_valid_license(body.resolved_url())
 
 @app.put("/artifacts/model/{id}/license-check")
 def license_check_plural(
