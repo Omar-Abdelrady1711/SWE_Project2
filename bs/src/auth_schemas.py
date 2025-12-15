@@ -1,3 +1,8 @@
+"""Pydantic schemas for auth: login, register, tokens, and profiles.
+
+Centralizes validation for authentication flows and user info payloads.
+Last Updated: 2025-12-14.
+"""
 # bs/src/auth_schemas.py
 """Pydantic schemas for authentication."""
 from pydantic import BaseModel, EmailStr, Field

@@ -1,3 +1,6 @@
+"""FastAPI service for artifact CRUD, ratings via `acemcli`, and JWT
+auth with local SQLite or DynamoDB storage. Last Updated: 2025-12-14."""
+
 from fastapi import FastAPI, APIRouter, Header, Depends, HTTPException, Response, Request
 from fastapi.responses import RedirectResponse, HTMLResponse, FileResponse
 from fastapi.openapi.docs import get_swagger_ui_html

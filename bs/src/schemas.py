@@ -1,3 +1,8 @@
+"""Pydantic schemas for artifact and rating responses.
+
+Defines request/response models used by FastAPI endpoints and the
+rating pipeline outputs for consistent validation. Last Updated: 2025-12-14.
+"""
 from pydantic import BaseModel, ConfigDict, HttpUrl
 from typing import List, Optional, Dict, Any
 from enum import Enum
