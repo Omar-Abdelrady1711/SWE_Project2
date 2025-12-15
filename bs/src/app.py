@@ -623,22 +623,34 @@ def root_health():
     return health_response()
 
 try:
-    try:
-        import bs.src.auth.models  # noqa: F401
-    except Exception:
-        pass
+    import bs.src.auth.models  # noqa: F401
+except Exception:
+    pass
 
+try:
     init_db()
+except Exception as e:
+    logging.getLogger(__name__).warning("DB init failed: %s", e)
+
+# Always attempt to include routers individually to avoid single-point failure
+try:
     from bs.src.api.routes.artifacts import router as artifacts_router
     api.include_router(artifacts_router, prefix="/artifacts", tags=["artifacts"])
-    try:
-        from bs.src.auth.routes import router as auth_router, admin_router
-        api.include_router(auth_router)
-        api.include_router(admin_router, prefix="/auth")
-    except Exception:
-        logging.getLogger(__name__).warning("Auth routes not loaded")
 except Exception as e:
     logging.getLogger(__name__).warning("Artifacts router not loaded: %s", e)
+
+try:
+    from bs.src.lineage.routes import router as lineage_router
+    api.include_router(lineage_router)
+except Exception as e:
+    logging.getLogger(__name__).warning("Lineage routes not loaded: %s", e)
+
+try:
+    from bs.src.auth.routes import router as auth_router, admin_router
+    api.include_router(auth_router)
+    api.include_router(admin_router, prefix="/auth")
+except Exception:
+    logging.getLogger(__name__).warning("Auth routes not loaded")
 
 @api.get("/")
 def api_root():
