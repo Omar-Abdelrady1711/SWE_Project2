@@ -47,7 +47,7 @@ export default function Login() {
   };
 
   return (
-    <main className="container" role="main" aria-labelledby="login-title">
+    <main id="main-content" className="container" role="main" aria-labelledby="login-title">
       <h1 id="login-title">Welcome back</h1>
       <p className="p-muted">Sign in to ACME Trustworthy Register</p>
 
@@ -55,18 +55,20 @@ export default function Login() {
       <div 
         style={{
           padding: "1rem",
-          backgroundColor: "#e7f3ff",
-          border: "1px solid #b3d9ff",
-          borderRadius: "4px",
+          backgroundColor: "#1e3a5f",
+          border: "1px solid #3d5a80",
+          borderRadius: "8px",
           marginBottom: "1.5rem",
           fontSize: "0.875rem",
+          color: "#e0e7ef",
         }}
         role="note"
+        aria-label="Test credentials for development"
       >
-        <strong>Test Credentials:</strong>
-        <ul style={{ margin: "0.5rem 0 0 1.5rem" }}>
-          <li>Admin: <code>admin</code> / <code>admin123</code></li>
-          <li>User: <code>user</code> / <code>user123</code></li>
+        <strong style={{ color: "#8fb3ff" }}>Test Credentials:</strong>
+        <ul style={{ margin: "0.5rem 0 0 1.5rem", paddingLeft: 0 }}>
+          <li>Admin: <code style={{ backgroundColor: "#2d4a6f", padding: "2px 6px", borderRadius: "4px" }}>admin</code> / <code style={{ backgroundColor: "#2d4a6f", padding: "2px 6px", borderRadius: "4px" }}>admin123</code></li>
+          <li>User: <code style={{ backgroundColor: "#2d4a6f", padding: "2px 6px", borderRadius: "4px" }}>user</code> / <code style={{ backgroundColor: "#2d4a6f", padding: "2px 6px", borderRadius: "4px" }}>user123</code></li>
         </ul>
       </div>
 
