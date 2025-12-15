@@ -319,15 +319,37 @@ else:
 
 # ------------------- NEW: COST + LICENSE HELPERS -------------------
 _cost_cache: Dict[str, float] = {}
+_github_license_cache: Dict[str, Optional[str]] = {}  # Cache for GitHub license lookups
 
 def _hf_repo_id_from_url(url: str) -> Optional[str]:
+    """Extract HuggingFace repo_id from URL.
+    
+    Handles:
+    - https://huggingface.co/bert-base-uncased (single-segment)
+    - https://huggingface.co/google/bert_uncased_L-2_H-128_A-2 (org/model)
+    - https://huggingface.co/bert-base-uncased/resolve/main/... (with resolve/tree)
+    """
     try:
         p = urlparse(url)
         if "huggingface.co" not in p.netloc:
             return None
         parts = [x for x in p.path.split("/") if x]
+        if not parts:
+            return None
+        
+        # Filter out special path segments
+        special_segments = {"resolve", "tree", "blob", "raw", "main", "master"}
+        
+        # Check if first segment is an org/user or a model name
         if len(parts) >= 2:
+            # If second segment is special (resolve/tree/etc), first is the model
+            if parts[1].lower() in special_segments:
+                return parts[0]
+            # Otherwise it's org/model format
             return f"{parts[0]}/{parts[1]}"
+        elif len(parts) == 1:
+            # Single segment = model name (like bert-base-uncased)
+            return parts[0]
         return None
     except Exception:
         return None
@@ -417,27 +439,64 @@ def estimate_cost_mb(url: str, artifact_type: str) -> float:
 
     return 0.0
 
-def _github_repo_license_spdx(github_url: str) -> Optional[str]:
+def _github_repo_license_spdx(github_url: str, use_cache: bool = True) -> tuple[Optional[str], int]:
+    """Get GitHub repo license SPDX. Returns (spdx_id, http_status_code).
+    
+    Status codes:
+    - 200: Success (spdx_id may still be None if no license)
+    - 404: Repo not found
+    - 502: API error
+    """
     gh = _github_owner_repo_from_url(github_url)
     if not gh:
-        return None
+        return None, 400
     owner, repo = gh
+    cache_key = f"{owner}/{repo}".lower()
+    
+    # Check cache first
+    if use_cache and cache_key in _github_license_cache:
+        cached = _github_license_cache[cache_key]
+        return cached, 200 if cached else 200  # Cached result
+    
     try:
         api_url = f"https://api.github.com/repos/{owner}/{repo}/license"
         r = requests.get(api_url, timeout=12, headers={"User-Agent": "ece461-autograder"})
+        
+        if r.status_code == 404:
+            # Could be repo not found OR repo has no license file
+            # Check if repo exists
+            repo_url = f"https://api.github.com/repos/{owner}/{repo}"
+            repo_r = requests.get(repo_url, timeout=12, headers={"User-Agent": "ece461-autograder"})
+            if repo_r.status_code == 404:
+                return None, 404  # Repo doesn't exist
+            # Repo exists but no license
+            _github_license_cache[cache_key] = None
+            return None, 200
+        
         if r.status_code != 200:
-            return None
+            return None, 502
+        
         data = r.json()
         lic = data.get("license") or {}
         spdx = lic.get("spdx_id")
         if isinstance(spdx, str) and spdx and spdx != "NOASSERTION":
-            return spdx
+            _github_license_cache[cache_key] = spdx
+            return spdx, 200
+        
+        _github_license_cache[cache_key] = None
+        return None, 200
     except Exception:
-        return None
-    return None
+        return None, 502
 
 def _hf_model_license_spdx(url: str) -> Optional[str]:
-    """Get the license SPDX identifier from a HuggingFace model."""
+    """Get the license SPDX identifier from a HuggingFace model.
+    
+    Handles multiple license formats:
+    - Direct string in data["license"]
+    - List in data["license"] (takes first)
+    - cardData.license
+    - Tags like "license:apache-2.0"
+    """
     repo_id = _hf_repo_id_from_url(url)
     if not repo_id:
         return None
@@ -447,37 +506,140 @@ def _hf_model_license_spdx(url: str) -> Optional[str]:
         if r.status_code != 200:
             return None
         data = r.json()
-        # HuggingFace stores license in cardData or directly in the response
-        license_id = data.get("license") or data.get("cardData", {}).get("license")
+        
+        # Try direct license field
+        license_id = data.get("license")
         if isinstance(license_id, str) and license_id:
             return license_id
+        if isinstance(license_id, list) and license_id:
+            # Take first valid string from list
+            for lic in license_id:
+                if isinstance(lic, str) and lic:
+                    return lic
+        
+        # Try cardData.license
+        card_data = data.get("cardData") or {}
+        card_license = card_data.get("license")
+        if isinstance(card_license, str) and card_license:
+            return card_license
+        if isinstance(card_license, list) and card_license:
+            for lic in card_license:
+                if isinstance(lic, str) and lic:
+                    return lic
+        
+        # Fallback: scan tags for license:<id>
+        tags = data.get("tags") or []
+        for tag in tags:
+            if isinstance(tag, str) and tag.startswith("license:"):
+                lic_from_tag = tag.split(":", 1)[1].strip()
+                if lic_from_tag:
+                    return lic_from_tag
+        
         return None
     except Exception:
         return None
 
 
+def _canonicalize_license(spdx: str) -> str:
+    """Canonicalize SPDX license ID for comparison.
+    
+    Normalizes variants like:
+    - gpl-3.0-only -> gpl-3.0
+    - gpl-2.0-or-later -> gpl-2.0
+    - apache_2.0 -> apache-2.0
+    - Apache-2.0 -> apache-2.0
+    """
+    s = (spdx or "").strip().lower()
+    # Replace underscores with hyphens
+    s = s.replace("_", "-")
+    # Remove -only and -or-later suffixes
+    s = re.sub(r"-only$", "", s)
+    s = re.sub(r"-or-later$", "", s)
+    # Normalize common variants
+    s = re.sub(r"^apache\s*2\.?0?$", "apache-2.0", s)
+    s = re.sub(r"^mit\s*license$", "mit", s)
+    s = re.sub(r"^bsd\s*3\s*clause$", "bsd-3-clause", s)
+    s = re.sub(r"^bsd\s*2\s*clause$", "bsd-2-clause", s)
+    return s
+
+
+def _get_license_category(lic: str) -> str:
+    """Categorize a license as permissive, weak-copyleft, strong-copyleft, or other."""
+    permissive = {"mit", "apache-2.0", "bsd-3-clause", "bsd-2-clause", "bsd-3-clause-clear",
+                  "isc", "cc0-1.0", "unlicense", "wtfpl", "0bsd", "zlib", "ncsa",
+                  "artistic-2.0", "postgresql", "ofl-1.1", "ms-pl"}
+    weak_copyleft = {"lgpl-2.0", "lgpl-2.1", "lgpl-3.0", "mpl-2.0", "epl-1.0", "epl-2.0", "osl-3.0"}
+    strong_copyleft = {"gpl-2.0", "gpl-3.0", "agpl-3.0", "cc-by-sa-4.0", "eupl-1.1", "eupl-1.2"}
+    
+    if lic in permissive:
+        return "permissive"
+    if lic in weak_copyleft:
+        return "weak-copyleft"
+    if lic in strong_copyleft:
+        return "strong-copyleft"
+    return "other"
+
+
 def _licenses_compatible(model_license: str, code_license: str) -> bool:
-    m = (model_license or "").strip().lower()
-    c = (code_license or "").strip().lower()
+    """Check if model and code licenses are compatible for fine-tuning + inference.
+    
+    Compatibility rules:
+    - Permissive + Permissive: Always compatible
+    - Permissive + Weak-copyleft: Compatible (weak copyleft allows linking)
+    - Permissive + Strong-copyleft: Compatible (model can use GPL code)
+    - Weak-copyleft + Weak-copyleft: Compatible if same family
+    - Weak-copyleft + Strong-copyleft: Compatible (GPL is more restrictive)
+    - Strong-copyleft + Strong-copyleft: Compatible if same family
+    - Same license: Always compatible
+    """
+    m = _canonicalize_license(model_license)
+    c = _canonicalize_license(code_license)
+    
     if not m or not c or "unknown" in m or "unknown" in c:
         return False
-
-    permissive = {"mit", "apache-2.0", "bsd-3-clause", "bsd-2-clause", "isc", "cc0-1.0"}
-    lgpl = {"lgpl-2.1", "lgpl-3.0"}
-    gpl = {"gpl-2.0", "gpl-3.0", "agpl-3.0"}
-
-    if (m in gpl and c not in gpl) or (c in gpl and m not in gpl):
-        return False
-
-    if m in permissive and c in permissive:
+    
+    # Same license is always compatible
+    if m == c:
         return True
-    if (m in lgpl and c in permissive) or (c in lgpl and m in permissive):
+    
+    m_cat = _get_license_category(m)
+    c_cat = _get_license_category(c)
+    
+    # Permissive licenses are compatible with everything
+    if m_cat == "permissive" and c_cat == "permissive":
         return True
-    if (m in lgpl and c in lgpl):
+    
+    # Permissive + weak-copyleft: compatible
+    if (m_cat == "permissive" and c_cat == "weak-copyleft") or \
+       (m_cat == "weak-copyleft" and c_cat == "permissive"):
         return True
-    if (m in gpl and c in gpl):
+    
+    # Permissive + strong-copyleft: the result would be under GPL, but that's allowed
+    if (m_cat == "permissive" and c_cat == "strong-copyleft") or \
+       (m_cat == "strong-copyleft" and c_cat == "permissive"):
         return True
-
+    
+    # Weak-copyleft + weak-copyleft: generally compatible
+    if m_cat == "weak-copyleft" and c_cat == "weak-copyleft":
+        return True
+    
+    # Weak-copyleft + strong-copyleft: compatible (result is strong-copyleft)
+    if (m_cat == "weak-copyleft" and c_cat == "strong-copyleft") or \
+       (m_cat == "strong-copyleft" and c_cat == "weak-copyleft"):
+        return True
+    
+    # Strong-copyleft + strong-copyleft: compatible if in same GPL family
+    if m_cat == "strong-copyleft" and c_cat == "strong-copyleft":
+        # GPL family can mix (gpl-2.0 and gpl-3.0 have compatibility issues, but for this use case we allow)
+        gpl_family = {"gpl-2.0", "gpl-3.0", "agpl-3.0"}
+        if m in gpl_family and c in gpl_family:
+            return True
+        # CC-BY-SA family
+        if "cc-by-sa" in m and "cc-by-sa" in c:
+            return True
+        return m == c  # Must be exact match for other strong copyleft
+    
+    # For "other" category, require exact match
     return m == c
 
 
@@ -1305,30 +1467,22 @@ def license_check(
     if not gh:
         raise HTTPException(status_code=400, detail="Invalid GitHub URL")
 
-    owner, repo = gh
-    try:
-        # First check if the repo exists
-        repo_api_url = f"https://api.github.com/repos/{owner}/{repo}"
-        repo_resp = requests.get(repo_api_url, timeout=12, headers={"User-Agent": "ece461-autograder"})
-        if repo_resp.status_code == 404:
-            raise HTTPException(status_code=404, detail="GitHub repository not found")
-        if repo_resp.status_code != 200:
-            raise HTTPException(status_code=502, detail="Could not retrieve GitHub repository info")
-    except HTTPException:
-        raise
-    except Exception:
+    # Get GitHub repo license (optimized: single API call with caching)
+    code_spdx, status_code = _github_repo_license_spdx(github_url)
+    if status_code == 404:
+        raise HTTPException(status_code=404, detail="GitHub repository not found")
+    if status_code == 502:
         raise HTTPException(status_code=502, detail="Could not retrieve GitHub repository info")
-
-    # Get GitHub repo license
-    code_spdx = _github_repo_license_spdx(github_url)
     if code_spdx is None:
-        raise HTTPException(status_code=502, detail="Could not retrieve license info from GitHub")
+        # Repo exists but has no license - treat as incompatible
+        return False
 
     # Get model license from HuggingFace (from the artifact's URL)
     model_url = art.get("url") or ""
     model_spdx = _hf_model_license_spdx(model_url)
     if model_spdx is None:
-        raise HTTPException(status_code=502, detail="Could not retrieve license info from model")
+        # Model has no license info - treat as incompatible rather than 502
+        return False
 
     # Check compatibility
     return _licenses_compatible(model_spdx, code_spdx)
