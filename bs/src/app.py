@@ -30,6 +30,9 @@ from bs.src.schemas import (
     ArtifactDataIn,
     ArtifactOut,
     ArtifactType,
+    LineageGraphOut,
+    LineageUpdateIn,
+    LineageEdge,
 )
 try:
     # optional import; if auth package exists, import permission helpers
@@ -117,11 +120,14 @@ class LocalStore:
         init_db()
         # Keep ratings in memory (could be moved to DB later)
         self.ratings: Dict[int, Dict[str, Any]] = {}
+        # Lineage relations: child_id -> [parent_ids]
+        self.parents: Dict[int, List[int]] = {}
 
     def clear_all(self):
         # Reset the SQL database
         reset_db()
         self.ratings.clear()
+        self.parents.clear()
 
     def put_artifact(self, item: Dict[str, Any]) -> Dict[str, Any]:
         # Save to SQL database
@@ -214,6 +220,16 @@ class LocalStore:
     def get_rating(self, aid: int) -> Optional[Dict[str, Any]]:
         return self.ratings.get(aid)
 
+    # --- lineage helpers ---
+    def set_parents(self, child_id: int, parent_ids: List[int]):
+        self.parents[child_id] = parent_ids
+
+    def get_parents(self, child_id: int) -> List[int]:
+        return self.parents.get(child_id, [])
+
+    def get_lineage_edges(self, child_id: int) -> List[tuple[int,int]]:
+        return [(p, child_id) for p in self.get_parents(child_id)]
+
 class DynamoStore:
     """
     DynamoDB-backed store for artifacts and ratings.
@@ -239,6 +255,8 @@ class DynamoStore:
         self._put_rating = _put_rating
         self._get_rating = _get_rating
         self._get_next_id = _get_next_id
+        # In Dynamo mode, maintain lineage in-memory for baseline tests
+        self._parents: Dict[int, List[int]] = {}
 
     def clear_all(self):
         self._reset_all()
@@ -265,6 +283,16 @@ class DynamoStore:
 
     def get_rating(self, aid: int) -> Optional[Dict[str, Any]]:
         return self._get_rating(aid)
+
+    # --- lineage helpers (in-memory for baseline) ---
+    def set_parents(self, child_id: int, parent_ids: List[int]):
+        self._parents[child_id] = parent_ids
+
+    def get_parents(self, child_id: int) -> List[int]:
+        return self._parents.get(child_id, [])
+
+    def get_lineage_edges(self, child_id: int) -> List[tuple[int,int]]:
+        return [(p, child_id) for p in self.get_parents(child_id)]
 
 # choose backend
 if _using_dynamo():
@@ -1085,6 +1113,80 @@ def delete_artifact_phase2(
 
     store.delete_artifact(int_id)
     return {"status": "deleted"}
+
+# ------------------- LINEAGE ENDPOINTS -------------------
+
+def _ensure_valid_id(id: str) -> int:
+    if not ID_PATTERN.fullmatch(id):
+        raise HTTPException(status_code=400, detail="Invalid artifact_id")
+    try:
+        return int(id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid artifact_id")
+
+@app.get("/artifact/{artifact_type}/{id}/lineage", response_model=LineageGraphOut)
+def get_lineage(
+    artifact_type: str,
+    id: str,
+    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
+):
+    if artifact_type not in VALID_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid artifact_type")
+    int_id = _ensure_valid_id(id)
+
+    obj = store.get_artifact(int_id)
+    if obj is None or obj["type"] != artifact_type:
+        raise HTTPException(status_code=404, detail="Artifact does not exist")
+
+    parent_ids = store.get_parents(int_id)
+    ancestors = [str(pid) for pid in parent_ids]
+    edges = [LineageEdge(parent_id=str(p), child_id=str(int_id)) for p in parent_ids]
+
+    return LineageGraphOut(
+        id=str(int_id),
+        type=ArtifactType(obj["type"]),
+        name=obj["name"],
+        ancestors=ancestors,
+        edges=edges,
+    )
+
+@app.post("/artifact/{artifact_type}/{id}/lineage", response_model=LineageGraphOut)
+def set_lineage(
+    artifact_type: str,
+    id: str,
+    payload: LineageUpdateIn,
+    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
+):
+    if artifact_type not in VALID_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid artifact_type")
+    int_id = _ensure_valid_id(id)
+
+    obj = store.get_artifact(int_id)
+    if obj is None or obj["type"] != artifact_type:
+        raise HTTPException(status_code=404, detail="Artifact does not exist")
+
+    # validate parent ids and existence (best-effort)
+    parent_ints: List[int] = []
+    for pid_str in payload.parents:
+        p_int = _ensure_valid_id(pid_str)
+        p_obj = store.get_artifact(p_int)
+        if p_obj is None:
+            raise HTTPException(status_code=404, detail=f"Parent artifact {pid_str} does not exist")
+        parent_ints.append(p_int)
+
+    store.set_parents(int_id, parent_ints)
+
+    parent_ids = store.get_parents(int_id)
+    ancestors = [str(pid) for pid in parent_ids]
+    edges = [LineageEdge(parent_id=str(p), child_id=str(int_id)) for p in parent_ids]
+
+    return LineageGraphOut(
+        id=str(int_id),
+        type=ArtifactType(obj["type"]),
+        name=obj["name"],
+        ancestors=ancestors,
+        edges=edges,
+    )
 
 @app.get("/artifact/model/{id}/rate", response_model=ModelRatingOut)
 def rate_model_artifact(

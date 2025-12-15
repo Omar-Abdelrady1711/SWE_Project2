@@ -40,6 +40,20 @@ class ArtifactOut(BaseModel):
     metadata: ArtifactMetadataOut
     data: Dict[str, Any]   # <-- IMPORTANT
 
+class LineageEdge(BaseModel):
+    parent_id: str
+    child_id: str
+
+class LineageGraphOut(BaseModel):
+    id: str
+    type: ArtifactType
+    name: str
+    ancestors: List[str]
+    edges: List[LineageEdge]
+
+class LineageUpdateIn(BaseModel):
+    parents: List[str]
+
 class SizeScoreOut(BaseModel):
     raspberry_pi: float
     jetson_nano: float
