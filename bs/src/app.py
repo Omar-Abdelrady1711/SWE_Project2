@@ -436,6 +436,26 @@ def _github_repo_license_spdx(github_url: str) -> Optional[str]:
         return None
     return None
 
+def _hf_model_license_spdx(url: str) -> Optional[str]:
+    """Get the license SPDX identifier from a HuggingFace model."""
+    repo_id = _hf_repo_id_from_url(url)
+    if not repo_id:
+        return None
+    try:
+        api_url = f"https://huggingface.co/api/models/{repo_id}"
+        r = requests.get(api_url, timeout=12, headers={"User-Agent": "ece461-autograder"})
+        if r.status_code != 200:
+            return None
+        data = r.json()
+        # HuggingFace stores license in cardData or directly in the response
+        license_id = data.get("license") or data.get("cardData", {}).get("license")
+        if isinstance(license_id, str) and license_id:
+            return license_id
+        return None
+    except Exception:
+        return None
+
+
 def _licenses_compatible(model_license: str, code_license: str) -> bool:
     m = (model_license or "").strip().lower()
     c = (code_license or "").strip().lower()
@@ -1339,23 +1359,68 @@ def _github_has_valid_license(github_url: str) -> bool:
     except Exception:
         return False
 
-# Spec: PUT /artifact/model/{id}/license-check {github_url} -> bool
-@app.put("/artifact/model/{id}/license-check")
+# Spec: POST /artifact/model/{id}/license-check {github_url} -> bool
+@app.post("/artifact/model/{id}/license-check")
 def license_check(
     id: str,
     body: LicenseCheckIn,
     x_authorization: str | None = Header(default=None, alias="X-Authorization"),
 ):
-    # Optional: you can keep this artifact-exists check (safe)
+    # Validate artifact exists and is a model
     aid = _parse_int_id(id)
     art = store.get_artifact(aid)
     if art is None or _normalize_type(art.get("type")) != "model":
         raise HTTPException(status_code=404, detail="Artifact does not exist")
 
-    # What the rubric wants: “Given a GitHub URL, does it have a valid license?”
-    return _github_has_valid_license(body.resolved_url())
+    github_url = body.resolved_url()
+    if not github_url:
+        raise HTTPException(status_code=400, detail="Missing GitHub URL")
 
-@app.put("/artifacts/model/{id}/license-check")
+    # Check if the GitHub repo exists and get its license
+    gh = _github_owner_repo_from_url(github_url)
+    if not gh:
+        raise HTTPException(status_code=400, detail="Invalid GitHub URL")
+
+    owner, repo = gh
+    try:
+        # First check if the repo exists
+        repo_api_url = f"https://api.github.com/repos/{owner}/{repo}"
+        repo_resp = requests.get(repo_api_url, timeout=12, headers={"User-Agent": "ece461-autograder"})
+        if repo_resp.status_code == 404:
+            raise HTTPException(status_code=404, detail="GitHub repository not found")
+        if repo_resp.status_code != 200:
+            raise HTTPException(status_code=502, detail="Could not retrieve GitHub repository info")
+    except HTTPException:
+        raise
+    except Exception:
+        raise HTTPException(status_code=502, detail="Could not retrieve GitHub repository info")
+
+    # Get GitHub repo license
+    code_spdx = _github_repo_license_spdx(github_url)
+    if code_spdx is None:
+        raise HTTPException(status_code=502, detail="Could not retrieve license info from GitHub")
+
+    # Get model license from HuggingFace (from the artifact's URL)
+    model_url = art.get("url") or ""
+    model_spdx = _hf_model_license_spdx(model_url)
+    if model_spdx is None:
+        raise HTTPException(status_code=502, detail="Could not retrieve license info from model")
+
+    # Check compatibility
+    return _licenses_compatible(model_spdx, code_spdx)
+
+
+# Also support PUT for backwards compatibility
+@app.put("/artifact/model/{id}/license-check")
+def license_check_put(
+    id: str,
+    body: LicenseCheckIn,
+    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
+):
+    return license_check(id, body, x_authorization)
+
+
+@app.post("/artifacts/model/{id}/license-check")
 def license_check_plural(
     id: str,
     body: LicenseCheckIn,
@@ -1363,5 +1428,13 @@ def license_check_plural(
 ):
     return license_check(id, body, x_authorization)
 
-# Re-include API router to ensure recently added endpoints are mounted
+@app.put("/artifacts/model/{id}/license-check")
+def license_check_plural_put(
+    id: str,
+    body: LicenseCheckIn,
+    x_authorization: str | None = Header(default=None, alias="X-Authorization"),
+):
+    return license_check(id, body, x_authorization)
+
+# Ensure API router is mounted after all route definitions
 app.include_router(api)
