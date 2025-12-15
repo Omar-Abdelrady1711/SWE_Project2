@@ -167,6 +167,7 @@ class LocalStore:
                     type=item["type"],
                     description=item.get("description"),
                     url=item.get("url"),
+                    download_url=item.get("download_url"),
                     readme=item.get("readme"),
                 )
                 db.add(artifact)
@@ -180,6 +181,7 @@ class LocalStore:
                     artifact.type = item["type"]
                     artifact.description = item.get("description")
                     artifact.url = item.get("url")
+                    artifact.download_url = item.get("download_url")
                     artifact.readme = item.get("readme")
                     db.commit()
                 else:
@@ -189,6 +191,7 @@ class LocalStore:
                         type=item["type"],
                         description=item.get("description"),
                         url=item.get("url"),
+                        download_url=item.get("download_url"),
                         readme=item.get("readme"),
                     )
                     db.add(artifact)
@@ -209,6 +212,7 @@ class LocalStore:
                 "type": _normalize_type(artifact.type),
                 "description": artifact.description,
                 "url": artifact.url,
+                "download_url": artifact.download_url,
                 "readme": getattr(artifact, "readme", None),
             }
         finally:
@@ -238,6 +242,7 @@ class LocalStore:
                     "type": _normalize_type(a.type),
                     "description": a.description,
                     "url": a.url,
+                    "download_url": getattr(a, "download_url", None),
                     "readme": getattr(a, "readme", None),
                 }
                 for a in artifacts
@@ -452,6 +457,10 @@ def _licenses_compatible(model_license: str, code_license: str) -> bool:
         return True
 
     return m == c
+
+def build_download_url(request: Request, artifact_type: str, aid: int) -> str:
+    # Uses FastAPI routing + root_path correctly (avoids /Prod/Prod)
+    return str(request.url_for("download_url1", artifact_type=artifact_type, id=str(aid)))
 
 from urllib.parse import urlparse
 
@@ -843,12 +852,12 @@ async def artifact_by_regex(
         if pattern.search(name):
             matches.append(
                 ArtifactMetadataOut(
-                    name=a["name"],
-                    id=str(a["id"]),
-                    type=ArtifactType(_normalize_type(a["type"])),
-                    url=a.get("url"),
+                name=a["name"],
+                id=str(a["id"]),
+                type=ArtifactType(_normalize_type(a["type"])),
                 )
             )
+
 
     if not matches:
         raise HTTPException(status_code=404, detail=NO_ARTIFACT_FOR_REGEX_MSG)
@@ -857,6 +866,7 @@ async def artifact_by_regex(
 
 @app.post("/artifact/{artifact_type}", response_model=ArtifactOut, status_code=201)
 def ingest_artifact_phase2(
+    request: Request,
     artifact_type: str,
     payload: ArtifactDataIn,
     x_authorization: str | None = Header(default=None, alias="X-Authorization"),
@@ -880,6 +890,11 @@ def ingest_artifact_phase2(
 
     item = store.put_artifact(item)
     aid = int(item["id"])
+
+    # Build + persist download_url (correct under API Gateway)
+    item["download_url"] = build_download_url(request, artifact_type, aid)
+    store.put_artifact(item)
+
     _metrics["upload_count"] += 1
 
     if artifact_type == "model":
@@ -925,9 +940,11 @@ def ingest_artifact_phase2(
         name=item["name"],
         id=str(aid),
         type=ArtifactType(_normalize_type(item["type"])),
-        url=item.get("url"),
     )
-    data: Dict[str, Any] = {"url": item.get("url")}
+    data = ArtifactDataOut(
+        url=item.get("url"),
+        download_url=item.get("download_url"),
+    )
     return ArtifactOut(metadata=metadata, data=data)
 
 @app.post("/artifacts", response_model=List[ArtifactMetadataOut])
@@ -978,7 +995,6 @@ def list_artifacts_phase2(
             name=a["name"],
             id=str(a["id"]),
             type=ArtifactType(_normalize_type(a["type"])),
-            url=a.get("url"),
         )
         for a in page
     ]
@@ -994,7 +1010,6 @@ def get_all_artifacts_alias(
             name=a["name"],
             id=str(a["id"]),
             type=ArtifactType(_normalize_type(a["type"])),
-            url=a.get("url"),
         )
         for a in all_items
     ]
@@ -1027,10 +1042,15 @@ def _get_artifact_by_type_and_id(artifact_type: str, id: str) -> ArtifactOut:
         name=obj["name"],
         id=str(obj["id"]),
         type=ArtifactType(_normalize_type(obj["type"])),
-        url=obj.get("url"),
     )
-    data = {"url": obj.get("url")}
+
+    data = ArtifactDataOut(
+        url=obj.get("url"),
+        download_url=obj.get("download_url"),
+    )
+
     return ArtifactOut(metadata=metadata, data=data)
+
 
 @app.get("/artifact/{artifact_type}/{id}", response_model=ArtifactOut)
 def get_artifact_phase2_singular(

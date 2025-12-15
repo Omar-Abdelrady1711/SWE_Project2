@@ -70,6 +70,8 @@ def put_artifact(item: Dict[str, Any]) -> None:
     }
     if item.get("url"):
         ddb_item["url"] = str(item["url"])
+    if item.get("download_url"):
+        ddb_item["download_url"] = str(item["download_url"])
     if item.get("description"):
         ddb_item["description"] = str(item["description"])
     if item.get("created_at"):

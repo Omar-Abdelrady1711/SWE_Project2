@@ -24,6 +24,7 @@ class ArtifactModel(Base):
     type = Column(String, nullable=False)
     description = Column(String, nullable=True)
     url = Column(String, nullable=True)
+    download_url = Column(String, nullable=True)
     readme = Column(String, nullable=True)
 
 def init_db() -> None:
