@@ -1,3 +1,9 @@
+"""SQLite-backed models and session helpers for local storage.
+
+Provides the `ArtifactModel` table and utilities to initialize,
+reset, and yield SQLAlchemy sessions for the backend when running
+locally or under Lambda `/tmp`. Last Updated: 2025-12-14.
+"""
 # bs/src/models_db.py
 import os
 from pathlib import Path

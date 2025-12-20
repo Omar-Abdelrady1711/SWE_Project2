@@ -1,6 +1,5 @@
-"""
-DynamoDB storage for artifacts and ratings.
-Uses lazy initialization to prevent import-time crashes when AWS isn't configured.
+"""DynamoDB storage layer for artifacts and ratings with lazy init to
+avoid import-time AWS setup errors. Last Updated: 2025-12-14.
 """
 import os
 from typing import Dict, Any, Optional, List

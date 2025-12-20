@@ -1,4 +1,10 @@
 import os
+"""Storage abstraction for artifacts and ratings (Dynamo or local).
+
+Exposes a unified interface for CRUD operations and querying across
+DynamoDB and local SQLite implementations. Last Updated: 2025-12-14.
+"""
+import os
 
 def using_dynamo() -> bool:
     return (

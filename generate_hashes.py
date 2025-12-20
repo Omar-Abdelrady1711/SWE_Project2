@@ -1,3 +1,6 @@
+"""Utility to generate and verify file hashes for integrity checks.
+Supports simple hashing workflows used during testing or deployment.
+Last Updated: 2025-12-14."""
 """Generate fresh bcrypt hashes"""
 import bcrypt
 

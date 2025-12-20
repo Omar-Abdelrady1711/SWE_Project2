@@ -3,6 +3,11 @@
 Simple JWT-based authentication for the artifact registry.
 In production, use proper password hashing (bcrypt) and secure secret management.
 """
+"""JWT auth utilities: login, token creation, and user management.
+
+Implements authentication helpers, token generation/validation and
+basic user CRUD used by protected endpoints. Last Updated: 2025-12-14.
+"""
 import os
 import time
 import jwt
