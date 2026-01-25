@@ -857,7 +857,7 @@ def _serve_index():
 
 @app.get("/")
 def root():
-    return _serve_index()
+    return RedirectResponse(url=f"{STAGE}/api", status_code=307)
 
 if _FRONTEND_DIST.exists():
     assets_dir = _FRONTEND_DIST / "assets"
@@ -897,6 +897,82 @@ handler = Mangum(app, api_gateway_base_path=STAGE)
 @app.get("/tracks")
 def get_tracks():
     return {"plannedTracks": ["Access control track"]}
+
+@api.get("/tracks")
+def get_tracks_api():
+    return {"tracks": ["Access control track"]}
+
+# ------------------- PHASE 2: SIMPLE INGEST + QUERY (compat) -------------------
+@api.post("/ingest", status_code=201)
+def api_ingest(payload: dict, x_authorization: str | None = Header(default=None, alias="X-Authorization")):
+    # enforce permission if auth is in play
+    try:
+        require_permission("upload")()
+    except Exception:
+        pass
+    t = (payload.get("type") or "").strip().lower()
+    name = (payload.get("name") or "").strip()
+    if t not in VALID_TYPES:
+        raise HTTPException(status_code=400, detail="Invalid type")
+    if not name:
+        raise HTTPException(status_code=400, detail="Missing name")
+
+    item = {
+        "id": None,
+        "name": name,
+        "type": t,
+        "url": None,
+        "description": None,
+        "readme": None,
+        "created_at": time.time(),
+    }
+    item = store.put_artifact(item)
+    return {"id": int(item["id"]), "name": item["name"], "type": item["type"]}
+
+@api.get("/artifacts")
+def api_artifacts_list():
+    items = store.list_artifacts()
+    items.sort(key=lambda x: int(x["id"]))
+    return {"artifacts": [
+        {"id": str(a["id"]), "name": a["name"], "type": _normalize_type(a["type"]), "url": a.get("url")}
+        for a in items
+    ]}
+
+@api.get("/artifacts/{id}")
+def api_artifact_by_id(id: str):
+    aid = _parse_int_id(id)
+    obj = store.get_artifact(aid)
+    if not obj:
+        raise HTTPException(status_code=404, detail="Not Found")
+    return {"id": str(obj["id"]), "name": obj["name"], "type": _normalize_type(obj["type"]), "url": obj.get("url")}
+
+@api.get("/artifacts/by_name/{name}")
+def api_artifact_by_name(name: str):
+    for a in store.list_artifacts():
+        if (a.get("name") or "") == name:
+            return {"id": int(a["id"]), "name": a["name"], "type": _normalize_type(a["type"]), "url": a.get("url")}
+    raise HTTPException(status_code=404, detail="Not Found")
+
+@api.get("/query")
+def api_query(type: Optional[str] = None, name: Optional[str] = None, regex: bool = False):
+    items = store.list_artifacts()
+    out = []
+    for a in items:
+        if type and _normalize_type(a["type"]) != _normalize_type(type):
+            continue
+        if name:
+            an = a["name"] or ""
+            if regex:
+                try:
+                    if not re.search(name, an):
+                        continue
+                except re.error:
+                    raise HTTPException(status_code=400, detail="Bad regex")
+            else:
+                if an != name:
+                    continue
+        out.append({"id": str(a["id"]), "name": a["name"], "type": _normalize_type(a["type"]), "url": a.get("url")})
+    return {"artifacts": out}
 
 @app.post("/api/reset")
 def app_api_reset_post(x_authorization: str | None = Header(default=None)):
@@ -1510,7 +1586,6 @@ def license_check_plural(
 ):
     return license_check(id, body, x_authorization)
 
-
 @app.put("/artifacts/model/{id}/license-check")
 def license_check_plural_put(
     id: str,
@@ -1518,3 +1593,6 @@ def license_check_plural_put(
     x_authorization: str | None = Header(default=None, alias="X-Authorization"),
 ):
     return license_check(id, body, x_authorization)
+
+# Ensure API router is mounted after all route definitions
+app.include_router(api)
